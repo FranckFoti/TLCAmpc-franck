@@ -1,0 +1,36 @@
+[project]
+name = "drone-sim"
+version = "0.1.0"
+description = "3D drone simulation with REST control"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "numpy>=1.26",
+  "pydantic>=2.6",
+  "matplotlib>=3.8",
+  "pillow>=10.0",
+  "scipy>=1.13",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5",
+  "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/drone_sim"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
