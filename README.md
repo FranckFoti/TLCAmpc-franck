@@ -3,7 +3,7 @@
 This document describes how to reproduce, verify, and visualize the simulation scenarios used in the paper *“Geometric and Control-Theoretic Limits on Drone Density in Bounded Airspace”* with this repository.  
 The configuration files under `configs/basic_paper` implement the MPC framework described in the paper. The overall software architecture is intentionally kept relatively modular and complex in order to make it straightforward to extend the implementation with additional controllers, physics models, and scenarios beyond those used in the manuscript.
 
-## 🚀 1. Setup
+## 1. Setup
 
 Requirement: Python 3.11+ (or a compatible version).
 
@@ -13,7 +13,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-## 🧠 2. Central MPC Architecture in the Codebase
+## 2. Central MPC Architecture in the Codebase
 
 All paper experiments use the same centralized MPC architecture:
 
@@ -73,7 +73,7 @@ All paper scenarios are defined in `configs/basic_paper/*.json` and follow the p
 }
 ```
 
-## 📽️ 3. REST API and Live Visualization
+## 3. REST API and Live Visualization
 
 ### 3.1 Starting the REST Server
 
@@ -282,30 +282,15 @@ The main constraints (implemented in the `mpc_central` coordinator) are:
 These constraints are enforced within the centralized SLSQP optimization and are additionally checked at the simulation level (via `Simulator._compute_collisions` and the verification script).
 
 
-## 📌 6. Citation
+## 6. Citation
 If you use this code or build upon our work, please cite our paper:
 
 
 ```bibtex
-@article{drones,
-  title={Empty},
-  author={Altinses, Diyar, Muemken, Linda, Lier, Stefan and Andreas, Schwung},
-  journal={Drones},
-  volume={XX},
-  number={XX},
-  pages={XX--XX},
-  year={XXXX},
-  publisher={mdpc}
+@article{dronesxxx,
+  title={Geometric and Control-Theoretic Limits on Drone Density in
+Bounded Airspace},
+  author={Altinses  Muemken, Lier, and Schwung},
+  journal={Drones}
 }
 ```
-
-
-## 📚 7. References 
-
-Below are selected related works and projects that inspired or complement this research:
-
-<a id="1">[1]</a> Altinses, D., Torres, D. O. S., Lier, S., & Schwung, A. (2025, February). Neural Data Fusion Enhanced PD Control for Precision Drone Landing in Synthetic Environments. In 2025 IEEE International Conference on Mechatronics (ICM) (pp. 1-7). IEEE.
-
-<a id="1">[2]</a> Altinses, D., Salazar Torres, D. O., Schwung, M., Lier, S., & Schwung, A. (2024). Optimizing Drone Logistics: A Scoring Algorithm for Enhanced Decision Making across Diverse Domains in Drone Airlines. Drones, 8(7), 307.
-
-<a id="1">[3]</a> Altinses, D., Torres, D. O. S., Gobachew, A. M., Lier, S., & Schwung, A. (2024). Synthetic Dataset Generation for Optimizing Multimodal Drone Delivery Systems. Drones (2504-446X), 8(12).
