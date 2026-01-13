@@ -52,13 +52,6 @@ class CentralMPCGlobalCoordinator:
     # constraint gradient is zero in lateral directions at the symmetric point.
     symmetry_break_accel: float = 0.05
 
-    # # Fallback used when SLSQP fails (often due to infeasibility with short horizons).
-    # # We apply braking and a repulsive term against nearby drones/obstacles to avoid continuing
-    # # into collisions.
-    # fallback_brake_gain: float = 2.0
-    # fallback_repulsion_gain: float = 8.0
-    # fallback_repulsion_eps: float = 1e-3
-
     maxiter: int = 120
     ftol: float = 1e-3
 
@@ -107,68 +100,6 @@ class CentralMPCGlobalCoordinator:
 
         return u
 
-    # def _fallback_controls(
-    #     self,
-    #     *,
-    #     opt_ids: list[str],
-    #     drone_ids: list[str],
-    #     xs: list[np.ndarray],
-    #     idx_opt: list[int],
-    #     umins: np.ndarray,
-    #     umaxs: np.ndarray,
-    #     safety_by_id: dict[str, float],
-    #     radii_by_id: dict[str, float],
-    #     obstacles: list[tuple[np.ndarray, float]],
-    # ) -> dict[str, np.ndarray]:
-    #     k_brake = float(self.fallback_brake_gain)
-    #     k_rep = float(self.fallback_repulsion_gain)
-    #     eps = float(self.fallback_repulsion_eps)
-    #
-    #     Ps = {did: np.asarray(xs[i], dtype=float).reshape(6)[:3] for i, did in enumerate(drone_ids)}
-    #     Vs = {did: np.asarray(xs[i], dtype=float).reshape(6)[3:] for i, did in enumerate(drone_ids)}
-    #
-    #     out: dict[str, np.ndarray] = {}
-    #     for j, i in enumerate(idx_opt):
-    #         id_i = opt_ids[j]
-    #         p = Ps[id_i]
-    #         v = Vs[id_i]
-    #
-    #         u = -k_brake * v
-    #
-    #         # Repel away from other drones using owner-only safety threshold.
-    #         rep = np.zeros(3, dtype=float)
-    #         for other_id in drone_ids:
-    #             if other_id == id_i:
-    #                 continue
-    #             d = p - Ps[other_id]
-    #             dist = float(np.linalg.norm(d))
-    #             if dist < eps:
-    #                 continue
-    #             thresh = float(safety_by_id[id_i] + radii_by_id[other_id] + self.safety_buffer)
-    #             pen = max(0.0, thresh - dist)
-    #             if pen <= 0.0:
-    #                 continue
-    #             rep += (pen / (dist + eps)) * (d / dist)
-    #
-    #         # Repel from obstacles.
-    #         for c, r in obstacles:
-    #             c = np.asarray(c, dtype=float).reshape(3)
-    #             d = p - c
-    #             dist = float(np.linalg.norm(d))
-    #             if dist < eps:
-    #                 continue
-    #             thresh = float(safety_by_id[id_i] + float(r) + self.safety_buffer)
-    #             pen = max(0.0, thresh - dist)
-    #             if pen <= 0.0:
-    #                 continue
-    #             rep += (pen / (dist + eps)) * (d / dist)
-    #
-    #         u = u + k_rep * rep
-    #         u = np.clip(u, umins[j], umaxs[j])
-    #         out[id_i] = u
-    #
-    #     return out
-
     def solve_controls(
         self,
         *,
@@ -184,12 +115,6 @@ class CentralMPCGlobalCoordinator:
         # External drones state (all drones, including optimized): id -> (p0, v0, radius)
         all_drone_state: dict[str, tuple[np.ndarray, np.ndarray, float]] | None = None,
     ) -> dict[str, np.ndarray]:
-        """Return per-drone control u (shape (3,)) for all drones.
-
-        - Drones whose controller implements central-cost are optimized.
-        - Others are treated as external: their control comes from their own controller
-          (computed outside) but their predicted trajectory is used for constraints.
-        """
 
         from scipy.optimize import minimize
 
@@ -327,45 +252,6 @@ class CentralMPCGlobalCoordinator:
             options={"maxiter": int(self.maxiter), "ftol": float(self.ftol), "disp": False},
         )
 
-        # if not res.success:
-        #     return self._fallback_controls(
-        #         opt_ids=opt_ids,
-        #         drone_ids=drone_ids,
-        #         xs=xs,
-        #         idx_opt=idx_opt,
-        #         umins=umins,
-        #         umaxs=umaxs,
-        #         safety_by_id=safety_by_id,
-        #         radii_by_id=radii_by_id,
-        #         obstacles=obstacles,
-        #     )
-        #
-        # # Even with a "success" flag, numerical tolerances can yield slight violations.
-        # cmin = float(
-        #     self._constraints(
-        #         res.x,
-        #         xs0=xs0,
-        #         opt_ids=opt_ids,
-        #         safety_by_id=safety_by_id,
-        #         radii_by_id=radii_by_id,
-        #         P_ext=ext_pred,
-        #         obstacles=obstacles,
-        #         amax=np.linalg.norm(umaxs, axis=1),
-        #     ).min(initial=0.0)
-        # )
-        # if cmin < -1e-3:
-        #     return self._fallback_controls(
-        #         opt_ids=opt_ids,
-        #         drone_ids=drone_ids,
-        #         xs=xs,
-        #         idx_opt=idx_opt,
-        #         umins=umins,
-        #         umaxs=umaxs,
-        #         safety_by_id=safety_by_id,
-        #         radii_by_id=radii_by_id,
-        #         obstacles=obstacles,
-        #     )
-
         u_opt = clip_u(self._unpack(res.x, M))
         for did, u_seq in zip(opt_ids, u_opt, strict=True):
             self._u_prev[did] = u_seq
@@ -420,8 +306,6 @@ class CentralMPCGlobalCoordinator:
                 for j in range(i + 1, M):
                     pi = P_opt[i, kk]
                     pj = P_opt[j, kk]
-                    # vi = V_opt[i, kk]
-                    # vj = V_opt[j, kk]
 
                     d = pi - pj
                     dist = float(np.linalg.norm(d))
@@ -434,16 +318,6 @@ class CentralMPCGlobalCoordinator:
 
                     vals.append(dist - thresh_i)
                     vals.append(dist - thresh_j)
-
-                    # # Braking-feasibility constraint (helps short horizons).
-                    # # Ensure the approaching relative speed is not too high for the remaining gap.
-                    # if dist > 1e-9:
-                    #     dhat = d / dist
-                    #     rel_speed = float(dhat @ (vi - vj))  # d/dt(dist)
-                    #     approach = 0.5 * (-rel_speed + abs(rel_speed))  # max(0, -rel_speed)
-                    #     a_stop = float(amax[i] + amax[j])
-                    #     vals.append(2.0 * a_stop * max(0.0, dist - thresh_i) - approach**2)
-                    #     vals.append(2.0 * a_stop * max(0.0, dist - thresh_j) - approach**2)
 
         # Optimized vs external predictions
         for kk in range(self.horizon):

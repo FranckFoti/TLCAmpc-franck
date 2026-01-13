@@ -60,7 +60,6 @@ class Simulator:
     @classmethod
     def from_config(cls, cfg: ScenarioConfig) -> "Simulator":
         # Ensure implementations are registered
-        # (imports are side-effectful registrations)
         from drone_sim.controllers import central_cost as _central_cost  # noqa: F401
         from drone_sim.physics import linear_kinematics as _  # noqa: F401
         from drone_sim.simulation import coordinator as _coord  # noqa: F401
