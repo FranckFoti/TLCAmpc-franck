@@ -177,17 +177,17 @@ It iterates over all `configs/*.json` and prints output of the form:
 Interpretation:
 
 - **min pairwise margin**  
-  $
+  $$
     \min_{i\neq j} \left(\|p_i - p_j\|_2 - (s_i + r_j)\right),
-  $
+  $$
   where `s_i` is the safety zone radius and `r_j` is the physical radius.  
   - `>= 0`: safety zones do not overlap (no violation of the safety distance).
   - Values on the order of $0.09$–$0.95$ indicate that drones remain at least the prescribed safety margin apart.
 
 - **max speed**  
-  $
+  $$
     \max_i \|v_i\|_2,
-  $
+  $$
   i.e., the maximum speed of any drone over the entire simulation.
 
 - **min room margin**  
