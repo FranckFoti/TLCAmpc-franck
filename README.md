@@ -206,17 +206,10 @@ Interpretation:
 
 Each drone is modeled as a discrete-time double integrator in three dimensions:
 
-- State  $
-    x_k = [p_{x,k}, p_{y,k}, p_{z,k}, v_{x,k}, v_{y,k}, v_{z,k}]^\top \in \mathbb{R}^6
-  $
-- Input (acceleration) $
-    u_k = [a_{x,k}, a_{y,k}, a_{z,k}]^\top \in \mathbb{R}^3
-  $
-- Sampling time $ \Delta t = 0.1 \,\text{s} $.
-- Discrete-time dynamics $
-    x_{k+1} = A x_k + B u_k,
-  $
-  with
+- State  $x_k = [p_{x,k}, p_{y,k}, p_{z,k}, v_{x,k}, v_{y,k}, v_{z,k}]^\top \in \mathbb{R}^6$
+- Input (acceleration) $u_k = [a_{x,k}, a_{y,k}, a_{z,k}]^\top \in \mathbb{R}^3$
+- Sampling time $\Delta t = 0.1 \,\text{s}$.
+- Discrete-time dynamics $x_{k+1} = A x_k + B u_k$, with
   $$
   A = \begin{bmatrix}
       I_3 & \Delta t\, I_3 \\
