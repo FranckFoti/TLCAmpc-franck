@@ -4,87 +4,85 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-
 ColorValue = str | list[float]
 
 
 class PhysicsSpec(BaseModel):
-    type: str
-    params: dict[str, Any] = Field(default_factory=dict)
+   type: str
+   params: dict[str, Any] = Field(default_factory=dict)
 
 
 class ControllerSpec(BaseModel):
-    type: str
-    params: dict[str, Any] = Field(default_factory=dict)
+   type: str
+   params: dict[str, Any] = Field(default_factory=dict)
 
 
 class DroneConfig(BaseModel):
-    drone_id: str
-    start: list[float] = Field(..., min_length=3, max_length=3)
-    waypoints: list[list[float]] = Field(default_factory=list)
-    target: list[float] = Field(..., min_length=3, max_length=3)
+   drone_id: str
+   start: list[float] = Field(..., min_length=3, max_length=3)
+   waypoints: list[list[float]] = Field(default_factory=list)
+   target: list[float] = Field(..., min_length=3, max_length=3)
 
-    # Optional per-drone controller override (otherwise ScenarioConfig.controller is used).
-    controller: ControllerSpec | None = None
+   # Optional per-drone controller override (otherwise ScenarioConfig.controller is used).
+   controller: ControllerSpec | None = None
 
-    # Drone physical radius (used for room clamping and visualization).
-    radius: float = 0.15
+   # Drone physical radius (used for room clamping and visualization).
+   radius: float = 0.15
 
-    # Visualization / safety bubble radius around the drone.
-    safety_zone: float = 3.0
+   # Visualization / safety bubble radius around the drone.
+   safety_zone: float = 3.0
 
-    # Colors used by the renderer. Each field accepts either:
-    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
-    # - an RGB list [r,g,b] either in 0..1 or 0..255.
-    drone_color: ColorValue = "tab:blue"
-    # If omitted, the renderer uses the drone_color.
-    safety_color: ColorValue | None = None
-    # If omitted, the renderer uses the drone_color.
-    trace_color: ColorValue | None = None
+   # Colors used by the renderer. Each field accepts either:
+   # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
+   # - an RGB list [r,g,b] either in 0..1 or 0..255.
+   drone_color: ColorValue = "tab:blue"
+   # If omitted, the renderer uses the drone_color.
+   safety_color: ColorValue | None = None
+   # If omitted, the renderer uses the drone_color.
+   trace_color: ColorValue | None = None
 
-    @field_validator("drone_color", "safety_color", "trace_color")
-    @classmethod
-    def _validate_color(cls, v: ColorValue | None) -> ColorValue | None:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            return v
-        if not isinstance(v, list) or len(v) != 3:
-            raise ValueError("color must be a string or an RGB list of length 3")
-        return [float(x) for x in v]
+   @field_validator("drone_color", "safety_color", "trace_color")
+   @classmethod
+   def _validate_color(cls, v: ColorValue | None) -> ColorValue | None:
+      if v is None:
+         return None
+      if isinstance(v, str):
+         return v
+      if not isinstance(v, list) or len(v) != 3:
+         raise ValueError("color must be a string or an RGB list of length 3")
+      return [float(x) for x in v]
 
 
 class ObstacleConfig(BaseModel):
-    center: list[float] = Field(..., min_length=3, max_length=3)
-    radius: float
+   center: list[float] = Field(..., min_length=3, max_length=3)
+   radius: float
 
 
 class RoomConfig(BaseModel):
-    """Axis-aligned room bounds used for visualization (and later constraints).
+   """Axis-aligned room bounds used for visualization (and later constraints).
+   """
 
-    `min`/`max` are 3D coordinates.
-    """
-
-    min: list[float] = Field(..., min_length=3, max_length=3)
-    max: list[float] = Field(..., min_length=3, max_length=3)
+   min: list[float] = Field(..., min_length=3, max_length=3)
+   max: list[float] = Field(..., min_length=3, max_length=3)
 
 
 class ScenarioConfig(BaseModel):
-    dt: float = 0.1
-    physics: PhysicsSpec
+   dt: float = 0.1
+   physics: PhysicsSpec
 
-    # Default controller used for drones that do not define DroneConfig.controller.
-    controller: ControllerSpec
+   # Default controller used for drones that do not define DroneConfig.controller.
+   controller: ControllerSpec
 
-    # Optional coordinator. When present, the simulation step can be coordinated centrally
-    # (e.g. centralized MPC over a subset of drones) while still allowing per-drone controllers.
-    coordinator: ControllerSpec | None = None
+   # The simulation step can be coordinated centrally (e.g. centralized MPC over a subset of drones) while still allowing per-drone controllers.
+   # This is optional for now, cause we want to make changes in central_cost later, so this is not needed any longer.
+   # Nevertheless, maybe there will also be an completely global coordinated system later, this can be used also.
+   coordinator: ControllerSpec | None = None
 
-    drones: list[DroneConfig]
-    obstacles: list[ObstacleConfig] = Field(default_factory=list)
+   drones: list[DroneConfig]
+   obstacles: list[ObstacleConfig] = Field(default_factory=list)
 
-    # Optional visualization bounds.
-    room: RoomConfig | None = None
+   # Optional visualization bounds.
+   room: RoomConfig | None = None
 
-    # global safety radius factor for repulsion (MVP)
-    safety_margin: float = 0.1
+   # global safety radius factor for repulsion (MVP)
+   safety_margin: float = 0.1

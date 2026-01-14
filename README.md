@@ -41,6 +41,9 @@ All paper experiments use the same centralized MPC architecture:
   <img src="./results/2DronesHorizon2.gif" width="250" height="250" alt="2 Drones small horizon" style="margin-right: 10px;">
 </p>
 
+<details>
+<summary><strong>Json Configuration for this scenario:</strong></summary>
+
 All paper scenarios are defined in `configs/basic_paper/*.json` and follow the pattern:
 
 ```json
@@ -72,6 +75,8 @@ All paper scenarios are defined in `configs/basic_paper/*.json` and follow the p
   "obstacles": [...]
 }
 ```
+
+</details>
 
 ## 3. REST API and Live Visualization
 

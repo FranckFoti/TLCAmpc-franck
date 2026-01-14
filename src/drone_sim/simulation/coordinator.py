@@ -83,6 +83,13 @@ class CentralMPCGlobalCoordinator:
         return X[:, :, :3]
 
     def _apply_symmetry_break(self, u0: np.ndarray) -> np.ndarray:
+        """Apply a tiny deterministic perturbation to break perfect symmetry.
+
+        Idea:
+        To avoid the situation where all drones sit on z=0 and never try to escape,
+        we nudge all three axes with a very small pattern that alternates per drone.
+        """
+
         eps = float(self.symmetry_break_accel)
         if eps <= 0.0:
             return u0
@@ -93,10 +100,19 @@ class CentralMPCGlobalCoordinator:
 
         u = np.asarray(u0, dtype=float).copy()
 
-        # Alternate +/- in x acceleration (axis 0) to force a tiny lateral separation.
+        # For each optimized drone i, add a tiny 3D bias vector whose sign alternates with i.
+        # This ensures that even if the initial guess sits
+        # perfectly on z=0 (and symmetric in x/y), the optimizer sees a non-trivial search direction in all axes.
+        # This base direction is randomized per call so that x, y, z components are drawn independently in [0.1, 1.0].
+        # We normalize to keep the magnitude controlled and let `symmetry_break_accel` set the scale.
+        base_vec = np.random.uniform(0.1, 1.0, size=3)
+        base_vec /= np.linalg.norm(base_vec)  # unit-ish direction
+
         for i in range(M):
             sign = 1.0 if (i % 2) == 0 else -1.0
-            u[i, :, 0] = u[i, :, 0] + sign * eps
+            delta = sign * eps * base_vec  # shape (3,)
+            # Broadcast over the horizon: same tiny bias on each step.
+            u[i, :, :] = u[i, :, :] + delta[None, :]
 
         return u
 
@@ -114,6 +130,9 @@ class CentralMPCGlobalCoordinator:
         external_predictions: dict[str, np.ndarray] | None = None,
         # External drones state (all drones, including optimized): id -> (p0, v0, radius)
         all_drone_state: dict[str, tuple[np.ndarray, np.ndarray, float]] | None = None,
+        # Optional room bounds for wall constraints (axis-aligned box).
+        room_min: np.ndarray | None = None,
+        room_max: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
 
         from scipy.optimize import minimize
@@ -208,6 +227,8 @@ class CentralMPCGlobalCoordinator:
                         radii_by_id=radii_by_id,
                         P_ext=ext_pred,
                         obstacles=obstacles,
+                        room_min=room_min,
+                        room_max=room_max,
                         amax=np.linalg.norm(umaxs, axis=1),
                     ).min(initial=0.0)
                     >= 0.0
@@ -233,6 +254,8 @@ class CentralMPCGlobalCoordinator:
                 radii_by_id=radii_by_id,
                 P_ext=ext_pred,
                 obstacles=obstacles,
+                room_min=room_min,
+                room_max=room_max,
                 amax=np.linalg.norm(umaxs, axis=1),
             ),
         }
@@ -251,6 +274,42 @@ class CentralMPCGlobalCoordinator:
             constraints=[cons],
             options={"maxiter": int(self.maxiter), "ftol": float(self.ftol), "disp": False},
         )
+
+        # Treat optimizer failures or strongly violated constraints as fatal instead of silently continuing with an invalid trajectory.
+        # This ensures we do not "find" a route when the constraints (e.g. walls/obstacles) make the problem infeasible.
+        if not res.success or not np.isfinite(res.fun):
+            raise RuntimeError(
+                "CentralMPCGlobalCoordinator optimization failed: "
+                f"{res.message} (status={res.status})"
+            )
+
+        g = self._constraints(
+            res.x,
+            xs0=xs0,
+            opt_ids=opt_ids,
+            safety_by_id=safety_by_id,
+            radii_by_id=radii_by_id,
+            P_ext=ext_pred,
+            obstacles=obstacles,
+            room_min=room_min,
+            room_max=room_max,
+            amax=np.linalg.norm(umaxs, axis=1),
+        )
+
+        min_margin = float(g.min(initial=np.inf)) if g.size else float("inf")
+        if not np.isfinite(min_margin):
+            raise RuntimeError(
+                "CentralMPCGlobalCoordinator produced non-finite constraint margins; "
+                "treating this as an optimization failure."
+            )
+
+        # Allow a tiny numerical tolerance around zero.
+        # Anything clearly below zero means some safety/obstacle constraint is violated (e.g. going through a wall or another drone).
+        if min_margin < -1e-6:
+            raise RuntimeError(
+                "CentralMPCGlobalCoordinator produced infeasible controls: "
+                f"min constraint margin {min_margin:.3e} < 0."
+            )
 
         u_opt = clip_u(self._unpack(res.x, M))
         for did, u_seq in zip(opt_ids, u_opt, strict=True):
@@ -283,6 +342,8 @@ class CentralMPCGlobalCoordinator:
         radii_by_id: dict[str, float],
         P_ext: dict[str, np.ndarray],
         obstacles: list[tuple[np.ndarray, float]],
+        room_min: np.ndarray | None,
+        room_max: np.ndarray | None,
         amax: np.ndarray,
     ) -> np.ndarray:
         """Inequality constraints c(u) >= 0 using owner-only safety-zone rule.
@@ -339,5 +400,30 @@ class CentralMPCGlobalCoordinator:
                     dist = float(np.linalg.norm(pi - c))
                     thresh = float(safety_by_id[id_i] + float(r) + self.safety_buffer)
                     vals.append(dist - thresh)
+
+        # Room (wall) constraints: ensure each drone's physical sphere stays inside
+        # the axis-aligned room box if room bounds are provided.
+        #
+        # We allow a small penetration tolerance `room_tol` (e.g. 0.1 m) by
+        # shifting the constraint margins: c_room = margin + room_tol.
+        # This means SLSQP enforces margin >= -room_tol, while the simulator
+        # still clamps positions exactly at the room boundary.
+        if room_min is not None and room_max is not None:
+            room_min = np.asarray(room_min, dtype=float).reshape(3)
+            room_max = np.asarray(room_max, dtype=float).reshape(3)
+            room_tol = 0.1
+            for kk in range(self.horizon):
+                for i in range(M):
+                    pi = P_opt[i, kk]
+                    id_i = opt_ids[i]
+                    r_i = float(radii_by_id[id_i])
+                    # Lower bounds: p - r >= room_min  -> margin = p - r - room_min
+                    for d in range(3):
+                        margin_lower = float(pi[d] - r_i - room_min[d])
+                        vals.append(margin_lower + room_tol)
+                    # Upper bounds: p + r <= room_max -> margin = room_max - (p + r)
+                    for d in range(3):
+                        margin_upper = float(room_max[d] - (pi[d] + r_i))
+                        vals.append(margin_upper + room_tol)
 
         return np.asarray(vals, dtype=float)
