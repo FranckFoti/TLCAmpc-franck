@@ -381,33 +381,19 @@ class CentralMPCGlobalCoordinator:
                     vals.append(dist - thresh_j)
 
         # Optimized vs external predictions
-        for kk in range(self.horizon):
-            for i in range(M):
-                pi = P_opt[i, kk]
-                id_i = opt_ids[i]
-                for other_id, Pj in P_ext.items():
-                    dist = float(np.linalg.norm(pi - Pj[kk]))
-                    thresh = float(safety_by_id[id_i] + radii_by_id[other_id] + self.safety_buffer)
-                    vals.append(dist - thresh)
+        self.observe_external_predictians(M, P_ext, P_opt, opt_ids, radii_by_id, safety_by_id, vals)
 
         # Optimized vs obstacles
-        for kk in range(self.horizon):
-            for i in range(M):
-                pi = P_opt[i, kk]
-                id_i = opt_ids[i]
-                for c, r in obstacles:
-                    c = np.asarray(c, dtype=float).reshape(3)
-                    dist = float(np.linalg.norm(pi - c))
-                    thresh = float(safety_by_id[id_i] + float(r) + self.safety_buffer)
-                    vals.append(dist - thresh)
+        self.observe_pbstacles(M, P_opt, obstacles, opt_ids, safety_by_id, vals)
 
-        # Room (wall) constraints: ensure each drone's physical sphere stays inside
-        # the axis-aligned room box if room bounds are provided.
-        #
-        # We allow a small penetration tolerance `room_tol` (e.g. 0.1 m) by
-        # shifting the constraint margins: c_room = margin + room_tol.
-        # This means SLSQP enforces margin >= -room_tol, while the simulator
-        # still clamps positions exactly at the room boundary.
+        # Room (wall) constraints: ensure each drone's physical sphere stays inside the axis-aligned room box if room bounds are provided.
+        self.observe_no_flying_zone(M, P_opt, opt_ids, radii_by_id, room_max, room_min, vals)
+
+        return np.asarray(vals, dtype=float)
+
+    def observe_no_flying_zone(self, M, P_opt, opt_ids, radii_by_id, room_max, room_min, vals):
+        # We allow a small penetration tolerance `room_tol` (e.g. 0.1 m) by shifting the constraint margins: c_room = margin + room_tol.
+        # This means SLSQP enforces margin >= -room_tol, while the simulator still clamps positions exactly at the room boundary.
         if room_min is not None and room_max is not None:
             room_min = np.asarray(room_min, dtype=float).reshape(3)
             room_max = np.asarray(room_max, dtype=float).reshape(3)
@@ -426,4 +412,23 @@ class CentralMPCGlobalCoordinator:
                         margin_upper = float(room_max[d] - (pi[d] + r_i))
                         vals.append(margin_upper + room_tol)
 
-        return np.asarray(vals, dtype=float)
+    def observe_pbstacles(self, M, P_opt, obstacles, opt_ids, safety_by_id, vals):
+        for kk in range(self.horizon):
+            for i in range(M):
+                pi = P_opt[i, kk]
+                id_i = opt_ids[i]
+                for c, r in obstacles:
+                    c = np.asarray(c, dtype=float).reshape(3)
+                    dist = float(np.linalg.norm(pi - c))
+                    thresh = float(safety_by_id[id_i] + float(r) + self.safety_buffer)
+                    vals.append(dist - thresh)
+
+    def observe_external_predictians(self, M, P_ext, P_opt, opt_ids, radii_by_id, safety_by_id, vals):
+        for kk in range(self.horizon):
+            for i in range(M):
+                pi = P_opt[i, kk]
+                id_i = opt_ids[i]
+                for other_id, Pj in P_ext.items():
+                    dist = float(np.linalg.norm(pi - Pj[kk]))
+                    thresh = float(safety_by_id[id_i] + radii_by_id[other_id] + self.safety_buffer)
+                    vals.append(dist - thresh)
