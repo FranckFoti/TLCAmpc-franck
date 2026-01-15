@@ -27,10 +27,10 @@ class DroneConfig(BaseModel):
    controller: ControllerSpec | None = None
 
    # Drone physical radius (used for room clamping and visualization).
-   radius: float = 0.15
+   radius: float = 0.2
 
    # Visualization / safety bubble radius around the drone.
-   safety_zone: float = 3.0
+   safety_zone: float = 1.0
 
    # Colors used by the renderer. Each field accepts either:
    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
@@ -41,7 +41,6 @@ class DroneConfig(BaseModel):
    # If omitted, the renderer uses the drone_color.
    trace_color: ColorValue | None = None
 
-   @field_validator("drone_color", "safety_color", "trace_color")
    @classmethod
    def _validate_color(cls, v: ColorValue | None) -> ColorValue | None:
       if v is None:
@@ -83,6 +82,3 @@ class ScenarioConfig(BaseModel):
 
    # Optional visualization bounds.
    room: RoomConfig | None = None
-
-   # global safety radius factor for repulsion (MVP)
-   safety_margin: float = 0.1

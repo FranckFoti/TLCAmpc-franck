@@ -17,8 +17,7 @@
   "coordinator": {
     "type": "mpc_central",
     "params": {
-      "horizon": 2,
-      "safety_buffer": 1.0
+      "horizon": 2
     }
   },
 

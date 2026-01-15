@@ -79,8 +79,7 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
          # Trace as a dotted/pointed line + a small arrow.
          if trace and len(trace) >= 2:
             T = np.stack([np.asarray(tp, dtype=float).reshape(3) for tp in trace], axis=0)
-            ax.plot(T[:, 0], T[:, 1], T[:, 2], color=c_trace, linewidth=1.2, alpha=0.9, linestyle=":", marker=".",
-                  markersize=2.5, )
+            ax.plot(T[:, 0], T[:, 1], T[:, 2], color=c_trace, linewidth=1.2, alpha=0.9, linestyle=":", marker=".", markersize=2.5)
 
             p0 = T[-2]
             p1 = T[-1]
@@ -90,13 +89,13 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
                d = d / dn
                arrow_len = 0.35
                ax.quiver(p1[0] - arrow_len * d[0], p1[1] - arrow_len * d[1], p1[2] - arrow_len * d[2], arrow_len * d[0],
-                         arrow_len * d[1], arrow_len * d[2], color=c_trace, linewidth=1.0, arrow_length_ratio=0.35, )
+                         arrow_len * d[1], arrow_len * d[2], color=c_trace, linewidth=1.0, arrow_length_ratio=0.35)
 
    # Obstacles (render centers; radius shown via point size)
    if obstacles:
       C = np.stack([c for c, _r in obstacles], axis=0)
       sizes = [max(20.0, float(r) * 300.0) for _c, r in obstacles]
-      ax.scatter(C[:, 0], C[:, 1], C[:, 2], s=sizes, c="tab:red", alpha=0.6, depthshade=True, label="obstacles", )
+      ax.scatter(C[:, 0], C[:, 1], C[:, 2], s=sizes, c="tab:red", alpha=0.6, depthshade=True, label="obstacles")
 
    ax.set_xlabel("x")
    ax.set_ylabel("y")

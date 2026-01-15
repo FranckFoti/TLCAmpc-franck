@@ -67,7 +67,7 @@ All paper scenarios are defined in `configs/basic_paper/*.json` and follow the p
     "type": "mpc_central",
     "params": {
       "horizon": H,
-      "safety_buffer": ...
+      [...]
     }
   },
 

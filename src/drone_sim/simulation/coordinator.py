@@ -8,9 +8,7 @@ from drone_sim.domain.registry import register_coordinator
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 
 
-def _predict_external_const_vel(
-    *, p0: np.ndarray, v0: np.ndarray, dt: float, horizon: int
-) -> np.ndarray:
+def _predict_external_const_vel(p0: np.ndarray, v0: np.ndarray, dt: float, horizon: int) -> np.ndarray:
     p0 = np.asarray(p0, dtype=float).reshape(3)
     v0 = np.asarray(v0, dtype=float).reshape(3)
     Ps = [p0 + (k + 1) * float(dt) * v0 for k in range(horizon)]
@@ -37,23 +35,21 @@ class CentralMPCGlobalCoordinator:
     Optimizes only drones whose controller implements the central-cost interface.
 
     Safety constraints use owner-only rule:
-        dist(owner, other) >= owner.safety_zone + other.radius + safety_buffer
+        dist(owner, other) >= owner.safety_zone + other.safety_buffer
 
     External-drone prediction default: constant velocity.
     External predictions can be overridden by passing `external_predictions`.
     """
 
     dt: float
-    horizon: int = 12
-    safety_buffer: float = 0.5
+    horizon: int = 5
 
     # Small lateral acceleration used only for warm-start / initial-guess symmetry breaking.
-    # This helps SLSQP escape the "head-on, perfectly collinear" deadlock where the distance
-    # constraint gradient is zero in lateral directions at the symmetric point.
+    # This helps SLSQP escape the "head-on, perfectly collinear" deadlock where the distance constraint gradient is zero in lateral directions at the symmetric point.
     symmetry_break_accel: float = 0.05
 
-    maxiter: int = 120
-    ftol: float = 1e-3
+    max_iter: int = 120
+    f_tol: float = 1e-3
 
     def __post_init__(self) -> None:
         self._phys = LinearKinematicsPhysics(dt=self.dt)
@@ -86,8 +82,7 @@ class CentralMPCGlobalCoordinator:
         """Apply a tiny deterministic perturbation to break perfect symmetry.
 
         Idea:
-        To avoid the situation where all drones sit on z=0 and never try to escape,
-        we nudge all three axes with a very small pattern that alternates per drone.
+            To avoid the situation where all drones sit on z=0 and never try to escape, we nudge all three axes with a very small pattern that alternates per drone.
         """
 
         eps = float(self.symmetry_break_accel)
@@ -101,8 +96,7 @@ class CentralMPCGlobalCoordinator:
         u = np.asarray(u0, dtype=float).copy()
 
         # For each optimized drone i, add a tiny 3D bias vector whose sign alternates with i.
-        # This ensures that even if the initial guess sits
-        # perfectly on z=0 (and symmetric in x/y), the optimizer sees a non-trivial search direction in all axes.
+        # This ensures that even if the initial guess sits perfectly on z=0 (and symmetric in x/y), the optimizer sees a non-trivial search direction in all axes.
         # This base direction is randomized per call so that x, y, z components are drawn independently in [0.1, 1.0].
         # We normalize to keep the magnitude controlled and let `symmetry_break_accel` set the scale.
         base_vec = np.random.uniform(0.1, 1.0, size=3)
@@ -116,24 +110,14 @@ class CentralMPCGlobalCoordinator:
 
         return u
 
-    def solve_controls(
-        self,
-        *,
-        drone_ids: list[str],
-        xs: list[np.ndarray],
-        prefs: list[np.ndarray],
-        radii: list[float],
-        safety_zones: list[float],
-        controllers: list[object],
-        obstacles: list[tuple[np.ndarray, float]],
-        # Optional override trajectories for external drones: id -> (H,3)
-        external_predictions: dict[str, np.ndarray] | None = None,
-        # External drones state (all drones, including optimized): id -> (p0, v0, radius)
-        all_drone_state: dict[str, tuple[np.ndarray, np.ndarray, float]] | None = None,
-        # Optional room bounds for wall constraints (axis-aligned box).
-        room_min: np.ndarray | None = None,
-        room_max: np.ndarray | None = None,
-    ) -> dict[str, np.ndarray]:
+    def solve_controls(self, *, drone_ids: list[str], xs: list[np.ndarray], prefs: list[np.ndarray], radii: list[float],
+                       safety_zones: list[float], controllers: list[object], obstacles: list[tuple[np.ndarray, float]],
+                       # Optional override trajectories for external drones: id -> (H,3):
+                       external_predictions: dict[str, np.ndarray] | None = None,
+                       # External drones state (all drones, including optimized): id -> (p0, v0, radius):
+                       all_drone_state: dict[str, tuple[np.ndarray, np.ndarray, float]] | None = None,
+                       # Optional room bounds for wall constraints (axis-aligned box):
+                       room_min: np.ndarray | None = None, room_max: np.ndarray | None = None) -> dict[str, np.ndarray]:
 
         from scipy.optimize import minimize
 
@@ -155,23 +139,20 @@ class CentralMPCGlobalCoordinator:
         prefs0 = np.stack([np.asarray(prefs[i], dtype=float).reshape(3) for i in idx_opt], axis=0)
 
         # Per-optimized-drone bounds
-        umins = []
-        umaxs = []
+        u_mins = []
+        u_maxs = []
         for i in idx_opt:
-            umin, umax = controllers[i].central_bounds()  # type: ignore[attr-defined]
-            umins.append(np.asarray(umin, dtype=float).reshape(3))
-            umaxs.append(np.asarray(umax, dtype=float).reshape(3))
-        umins = np.stack(umins, axis=0)
-        umaxs = np.stack(umaxs, axis=0)
+            u_min, u_max = controllers[i].central_bounds()  # type: ignore[attr-defined]
+            u_mins.append(np.asarray(u_min, dtype=float).reshape(3))
+            u_maxs.append(np.asarray(u_max, dtype=float).reshape(3))
+        u_mins = np.stack(u_mins, axis=0)
+        u_maxs = np.stack(u_maxs, axis=0)
 
         def clip_u(u: np.ndarray) -> np.ndarray:
-            return np.clip(u, umins[:, None, :], umaxs[:, None, :])
+            return np.clip(u, u_mins[:, None, :], u_maxs[:, None, :])
 
         # External predictions for constraints
-        ext_pred: dict[str, np.ndarray] = {}
-        if external_predictions:
-            for k, v in external_predictions.items():
-                ext_pred[k] = np.asarray(v, dtype=float).reshape((self.horizon, 3))
+        ext_pred = self.set_external_predictions(external_predictions)
 
         if all_drone_state is None:
             all_drone_state = {}
@@ -183,9 +164,7 @@ class CentralMPCGlobalCoordinator:
             if did not in all_drone_state:
                 continue
             p0, v0, _r = all_drone_state[did]
-            ext_pred[did] = _predict_external_const_vel(
-                p0=p0, v0=v0, dt=self.dt, horizon=self.horizon
-            )
+            ext_pred[did] = _predict_external_const_vel(p0=p0, v0=v0, dt=self.dt, horizon=self.horizon)
 
         # Warm-start: shift previous solution if available
         u0 = np.zeros((M, self.horizon, 3), dtype=float)
@@ -201,8 +180,7 @@ class CentralMPCGlobalCoordinator:
                 ug = controllers[i].central_initial_guess(xs[i], prefs[i])  # type: ignore[attr-defined]
                 ug = np.asarray(ug, dtype=float).reshape((-1, 3))
 
-                # Controllers may have their own configured horizon; the coordinator owns the
-                # optimization horizon. Trim/pad initial guesses accordingly.
+                # Controllers may have their own configured horizon; the coordinator owns the optimization horizon. Trim/pad initial guesses accordingly.
                 if ug.shape[0] >= self.horizon:
                     ug = ug[: self.horizon]
                 else:
@@ -219,19 +197,8 @@ class CentralMPCGlobalCoordinator:
             for _ in range(12):
                 u0 = clip_u(alpha * u_guess)
                 if (
-                    self._constraints(
-                        self._pack(u0),
-                        xs0=xs0,
-                        opt_ids=opt_ids,
-                        safety_by_id=safety_by_id,
-                        radii_by_id=radii_by_id,
-                        P_ext=ext_pred,
-                        obstacles=obstacles,
-                        room_min=room_min,
-                        room_max=room_max,
-                        amax=np.linalg.norm(umaxs, axis=1),
-                    ).min(initial=0.0)
-                    >= 0.0
+                    self._constraints(self._pack(u0), xs0=xs0, opt_ids=opt_ids, safety_by_id=safety_by_id, radii_by_id=radii_by_id,
+                                      P_ext=ext_pred, obstacles=obstacles, room_min=room_min, room_max=room_max).min(initial=0.0) >= 0.0
                 ):
                     break
                 alpha *= 0.5
@@ -242,74 +209,32 @@ class CentralMPCGlobalCoordinator:
         for j in range(M):
             for _k in range(self.horizon):
                 for d in range(3):
-                    bounds.append((float(umins[j, d]), float(umaxs[j, d])))
+                    bounds.append((float(u_mins[j, d]), float(u_maxs[j, d])))
 
         cons = {
             "type": "ineq",
-            "fun": lambda u_flat: self._constraints(
-                u_flat,
-                xs0=xs0,
-                opt_ids=opt_ids,
-                safety_by_id=safety_by_id,
-                radii_by_id=radii_by_id,
-                P_ext=ext_pred,
-                obstacles=obstacles,
-                room_min=room_min,
-                room_max=room_max,
-                amax=np.linalg.norm(umaxs, axis=1),
-            ),
+            "fun": lambda u_flat: self._constraints(u_flat, xs0=xs0, opt_ids=opt_ids, safety_by_id=safety_by_id, radii_by_id=radii_by_id,
+                                                    P_ext=ext_pred, obstacles=obstacles, room_min=room_min, room_max=room_max)
         }
 
-        res = minimize(
-            lambda u_flat: self._cost(
-                u_flat,
-                xs0=xs0,
-                prefs0=prefs0,
-                controllers=[controllers[i] for i in idx_opt],
-                clip_u=clip_u,
-            ),
-            self._pack(u0),
-            method="SLSQP",
-            bounds=bounds,
-            constraints=[cons],
-            options={"maxiter": int(self.maxiter), "ftol": float(self.ftol), "disp": False},
-        )
+        res = minimize(lambda u_flat: self._cost(u_flat, xs0=xs0, prefs0=prefs0, controllers=[controllers[i] for i in idx_opt],
+                                                    clip_u=clip_u), self._pack(u0), method="SLSQP", bounds=bounds, constraints=[cons],
+                                                    options={"maxiter": int(self.max_iter), "ftol": float(self.f_tol), "disp": False})
 
         # Treat optimizer failures or strongly violated constraints as fatal instead of silently continuing with an invalid trajectory.
         # This ensures we do not "find" a route when the constraints (e.g. walls/obstacles) make the problem infeasible.
         if not res.success or not np.isfinite(res.fun):
-            raise RuntimeError(
-                "CentralMPCGlobalCoordinator optimization failed: "
-                f"{res.message} (status={res.status})"
-            )
+            raise RuntimeError(f"CentralMPCGlobalCoordinator optimization failed: {res.message} (status={res.status})")
 
-        g = self._constraints(
-            res.x,
-            xs0=xs0,
-            opt_ids=opt_ids,
-            safety_by_id=safety_by_id,
-            radii_by_id=radii_by_id,
-            P_ext=ext_pred,
-            obstacles=obstacles,
-            room_min=room_min,
-            room_max=room_max,
-            amax=np.linalg.norm(umaxs, axis=1),
-        )
+        g = self._constraints( res.x, xs0=xs0, opt_ids=opt_ids, safety_by_id=safety_by_id, radii_by_id=radii_by_id, P_ext=ext_pred, obstacles=obstacles, room_min=room_min, room_max=room_max)
 
         min_margin = float(g.min(initial=np.inf)) if g.size else float("inf")
         if not np.isfinite(min_margin):
-            raise RuntimeError(
-                "CentralMPCGlobalCoordinator produced non-finite constraint margins; "
-                "treating this as an optimization failure."
-            )
+            raise RuntimeError("CentralMPCGlobalCoordinator produced non-finite constraint margins, treating this as an optimization failure.")
 
-        # Allow a tiny numerical tolerance around zero.
-        # Anything clearly below zero means some safety/obstacle constraint is violated (e.g. going through a wall or another drone).
+        # Allow a tiny numerical tolerance around zero. Anything clearly below zero means some safety/obstacle constraint is violated (e.g. going through a wall or another drone).
         if min_margin < -1e-6:
-            raise RuntimeError(
-                "CentralMPCGlobalCoordinator produced infeasible controls: "
-                f"min constraint margin {min_margin:.3e} < 0."
-            )
+            raise RuntimeError(f"CentralMPCGlobalCoordinator produced infeasible controls: min constraint margin {min_margin:.3e} < 0.")
 
         u_opt = clip_u(self._unpack(res.x, M))
         for did, u_seq in zip(opt_ids, u_opt, strict=True):
@@ -317,39 +242,27 @@ class CentralMPCGlobalCoordinator:
 
         return {did: u_opt[k, 0].copy() for k, did in enumerate(opt_ids)}
 
-    def _cost(
-        self,
-        u_flat: np.ndarray,
-        *,
-        xs0: np.ndarray,
-        prefs0: np.ndarray,
-        controllers: list[object],
-        clip_u,
-    ) -> float:
+    def set_external_predictions(self, external_predictions):
+        ext_pred: dict[str, np.ndarray] = {}
+        if external_predictions:
+            for k, v in external_predictions.items():
+                ext_pred[k] = np.asarray(v, dtype=float).reshape((self.horizon, 3))
+        return ext_pred
+
+    def _cost(self, u_flat: np.ndarray, *, xs0: np.ndarray, prefs0: np.ndarray, controllers: list[object], clip_u) -> float:
         u = clip_u(self._unpack(u_flat, xs0.shape[0]))
         total = 0.0
+
         for i in range(xs0.shape[0]):
             total += float(controllers[i].central_cost(u[i], xs0[i], prefs0[i]))  # type: ignore[attr-defined]
         return float(total)
 
-    def _constraints(
-        self,
-        u_flat: np.ndarray,
-        *,
-        xs0: np.ndarray,
-        opt_ids: list[str],
-        safety_by_id: dict[str, float],
-        radii_by_id: dict[str, float],
-        P_ext: dict[str, np.ndarray],
-        obstacles: list[tuple[np.ndarray, float]],
-        room_min: np.ndarray | None,
-        room_max: np.ndarray | None,
-        amax: np.ndarray,
-    ) -> np.ndarray:
+    def _constraints(self, u_flat: np.ndarray, *, xs0: np.ndarray, opt_ids: list[str], safety_by_id: dict[str, float], radii_by_id: dict[str, float],
+                     P_ext: dict[str, np.ndarray], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None, room_max: np.ndarray | None) -> np.ndarray:
         """Inequality constraints c(u) >= 0 using owner-only safety-zone rule.
 
-        For each optimized drone A and any other object B:
-            ||p_A - p_B|| >= A.safety_zone + B.radius + safety_buffer
+            For each optimized drone A and any other object B:
+                ||p_A - p_B|| >= A.safety_zone + B.safety_buffer
         """
 
         # Build predicted state/position/velocity for optimized drones
@@ -357,7 +270,6 @@ class CentralMPCGlobalCoordinator:
         u = self._unpack(u_flat, M)
         X_opt = self._predict_states(xs0, u)
         P_opt = X_opt[:, :, :3]
-        # V_opt = X_opt[:, :, 3:]
 
         vals: list[float] = []
 
@@ -373,18 +285,18 @@ class CentralMPCGlobalCoordinator:
 
                     id_i = opt_ids[i]
                     id_j = opt_ids[j]
+                    thresh = float(safety_by_id[id_j] + safety_by_id[id_i])
 
-                    thresh_i = float(safety_by_id[id_i] + radii_by_id[id_j] + self.safety_buffer)
-                    thresh_j = float(safety_by_id[id_j] + radii_by_id[id_i] + self.safety_buffer)
+                    # DEBUGPRINT  TODO: remove!!
+                    print("[central_mpc_debug] kk=%d pair=(%s,%s) dist=%.3f thresh_i=%.3f thresh_j=%.3f" % (kk, id_i, id_j, dist, safety_by_id[id_i], safety_by_id[id_j]))
 
-                    vals.append(dist - thresh_i)
-                    vals.append(dist - thresh_j)
+                    vals.append(dist - thresh)
 
         # Optimized vs external predictions
-        self.observe_external_predictians(M, P_ext, P_opt, opt_ids, radii_by_id, safety_by_id, vals)
+        self.observe_external_predictions(M, P_ext, P_opt, opt_ids, safety_by_id, vals)
 
         # Optimized vs obstacles
-        self.observe_pbstacles(M, P_opt, obstacles, opt_ids, safety_by_id, vals)
+        self.observe_obstacles(M, P_opt, obstacles, opt_ids, safety_by_id, vals)
 
         # Room (wall) constraints: ensure each drone's physical sphere stays inside the axis-aligned room box if room bounds are provided.
         self.observe_no_flying_zone(M, P_opt, opt_ids, radii_by_id, room_max, room_min, vals)
@@ -393,16 +305,16 @@ class CentralMPCGlobalCoordinator:
 
     def observe_no_flying_zone(self, M, P_opt, opt_ids, radii_by_id, room_max, room_min, vals):
         # We allow a small penetration tolerance `room_tol` (e.g. 0.1 m) by shifting the constraint margins: c_room = margin + room_tol.
-        # This means SLSQP enforces margin >= -room_tol, while the simulator still clamps positions exactly at the room boundary.
+        # This means SLSQP enforces margin >= -room_tol, while the simulator still clamps positions exactly in room boundary.
         if room_min is not None and room_max is not None:
             room_min = np.asarray(room_min, dtype=float).reshape(3)
             room_max = np.asarray(room_max, dtype=float).reshape(3)
-            room_tol = 0.1
+            room_tol = 0.0
+
             for kk in range(self.horizon):
                 for i in range(M):
                     pi = P_opt[i, kk]
-                    id_i = opt_ids[i]
-                    r_i = float(radii_by_id[id_i])
+                    r_i = float(radii_by_id[opt_ids[i]])
                     # Lower bounds: p - r >= room_min  -> margin = p - r - room_min
                     for d in range(3):
                         margin_lower = float(pi[d] - r_i - room_min[d])
@@ -412,23 +324,22 @@ class CentralMPCGlobalCoordinator:
                         margin_upper = float(room_max[d] - (pi[d] + r_i))
                         vals.append(margin_upper + room_tol)
 
-    def observe_pbstacles(self, M, P_opt, obstacles, opt_ids, safety_by_id, vals):
+    def observe_obstacles(self, M, P_opt, obstacles, opt_ids, safety_by_id, vals):
         for kk in range(self.horizon):
             for i in range(M):
                 pi = P_opt[i, kk]
-                id_i = opt_ids[i]
                 for c, r in obstacles:
                     c = np.asarray(c, dtype=float).reshape(3)
                     dist = float(np.linalg.norm(pi - c))
-                    thresh = float(safety_by_id[id_i] + float(r) + self.safety_buffer)
+                    thresh = float(safety_by_id[opt_ids[i]] + float(r))
                     vals.append(dist - thresh)
 
-    def observe_external_predictians(self, M, P_ext, P_opt, opt_ids, radii_by_id, safety_by_id, vals):
+    def observe_external_predictions(self, M, P_ext, P_opt, opt_ids, safety_by_id, vals):
         for kk in range(self.horizon):
             for i in range(M):
                 pi = P_opt[i, kk]
                 id_i = opt_ids[i]
                 for other_id, Pj in P_ext.items():
                     dist = float(np.linalg.norm(pi - Pj[kk]))
-                    thresh = float(safety_by_id[id_i] + radii_by_id[other_id] + self.safety_buffer)
+                    thresh = float(safety_by_id[other_id] + safety_by_id[id_i])
                     vals.append(dist - thresh)

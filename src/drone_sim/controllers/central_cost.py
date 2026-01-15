@@ -95,8 +95,6 @@ class CentralMPCAgent(Controller):
       return float(total)
 
    # Controller interface: when used standalone, we just apply the first step of the initial guess.
-   def control(self, x: np.ndarray, p_ref: np.ndarray,
-         neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]],
-         obstacles: list[tuple[np.ndarray, float]], *, self_radius: float, self_safety_zone: float, ) -> np.ndarray:
+   def control(self, x: np.ndarray, p_ref: np.ndarray, neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]], obstacles: list[tuple[np.ndarray, float]], *, self_radius: float, self_safety_zone: float, ) -> np.ndarray:
       u0 = self.central_initial_guess(x, p_ref)[0]
       return np.clip(u0, self._u_min, self._u_max)

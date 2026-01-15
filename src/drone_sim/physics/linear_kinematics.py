@@ -13,19 +13,19 @@ from drone_sim.physics.base import PhysicsModel
 class LinearKinematicsPhysics(PhysicsModel):
    """Discrete-time constant-acceleration model.
 
-   State:
-       x = [x, y, z, v_x, v_y, v_z]^T
-   Control:
-       u = [a_x, a_y, a_z]^T
+      State:
+          x = [x, y, z, v_x, v_y, v_z]^T
+      Control:
+          u = [a_x, a_y, a_z]^T
 
-   Update:
-       x_{k+1} = A x_k + B u_k
+      Update:
+          x_{k+1} = A x_k + B u_k
 
-   A = [[I, dt*I],
-        [0,   I]]
+      A = [[I, dt*I],
+           [0,   I]]
 
-   B = [[0.5*dt^2*I],
-        [  dt*I  ]]
+      B = [[0.5*dt^2*I],
+           [  dt*I  ]]
    """
 
    def __post_init__(self) -> None:

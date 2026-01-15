@@ -6,7 +6,7 @@
   "controller": {
     "type": "mpc_agent",
     "params": {
-      "horizon": 1,
+      "horizon": 5,
       "q_pos": [3.0, 3.0, 3.0],
       "r_u": [0.1, 0.1, 0.1],
       "u_min": [-3.0, -3.0, -3.0],
@@ -17,8 +17,7 @@
   "coordinator": {
     "type": "mpc_central",
     "params": {
-      "horizon": 1,
-      "safety_buffer": 1.0
+      "horizon": 5
     }
   },
 
