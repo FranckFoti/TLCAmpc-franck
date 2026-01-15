@@ -33,6 +33,7 @@ class Drone:
    drone_id: str
    radius: float
    safety_zone: float
+   cons_stop: float
 
    color: Color
    safety_color: Color

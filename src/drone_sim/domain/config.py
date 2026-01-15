@@ -32,6 +32,9 @@ class DroneConfig(BaseModel):
    # Visualization / safety bubble radius around the drone.
    safety_zone: float = 1.0
 
+   # Conservative stopping addition, like it is shown in the paper
+   cons_stop: float = 0.1
+
    # Colors used by the renderer. Each field accepts either:
    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
    # - an RGB list [r,g,b] either in 0..1 or 0..255.
