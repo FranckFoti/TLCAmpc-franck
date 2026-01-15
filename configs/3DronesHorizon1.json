@@ -28,6 +28,7 @@
       "target": [2.0, 0.0, 0.0],
       "radius": 0.2,
       "safety_zone": 1.0,
+      "cons_stop": 0.2,
       "drone_color": "#00FFFF"
     },
     {
@@ -36,6 +37,7 @@
       "target": [-2.0, 0.0, 0.0],
       "radius": 0.2,
       "safety_zone": 1.0,
+      "cons_stop": 0.2,
       "drone_color": "#800080"
     },
     {
@@ -44,6 +46,7 @@
       "target": [0.0, 2.0, 0.0],
       "radius": 0.2,
       "safety_zone": 1.0,
+      "cons_stop": 0.2,
       "drone_color": "#DC143C"
     }
   ]
