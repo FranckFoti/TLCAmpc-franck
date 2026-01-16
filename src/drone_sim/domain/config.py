@@ -33,7 +33,7 @@ class DroneConfig(BaseModel):
    safety_zone: float = 1.0
 
    # Conservative stopping addition, like it is shown in the paper
-   cons_stop: float = 0.1
+   cons_stop: float = 0.0
 
    # Colors used by the renderer. Each field accepts either:
    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")

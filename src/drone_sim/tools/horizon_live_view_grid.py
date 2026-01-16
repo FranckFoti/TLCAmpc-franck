@@ -179,7 +179,7 @@ def _load_config(base_url: str, cfg_dict, client: Client, status: Status) -> Sta
    return status
 
 def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: str = "http://127.0.0.1:8000", out_dir: Path, max_steps: int = 500,
-                                  per_request_timeout_s: float = 120.0, total_timeout_s: float = 360.0, gif_fps: float = 20.0, width: int = 900, height: int = 700,
+                                  per_request_timeout_s: float = 360.0, total_timeout_s: float = 600.0, gif_fps: float = 20.0, width: int = 900, height: int = 700,
                                   dpi: int = 120, elev: float = 20.0, azim: float = -60.0) -> None:
    """
    Run one (N, H) pair through the REST API and create a GIF.
@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> None:
    args = p.parse_args(argv)
 
    drone_counts = range(2, 8)
-   horizons = range(1, 11)
+   horizons = range(1, 21)
 
    print(f"Running live-view GIF grid for N in {list(drone_counts)}, H in {list(horizons)}")
    print(f"Base URL: {args.base_url}")

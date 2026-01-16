@@ -76,13 +76,13 @@ def main():
 
     room_min = (-2.5, -2.5, -2.5)
     room_max = ( 2.5,  2.5,  2.5)
-    min_pair_distance = 2.21
-    wall_margin = 1.0
+    min_pair_distance = 2.1
+    wall_margin = 1.1
 
     patterns: Dict[int, List[Tuple[List[float], List[float]]]] = {}
     failed: List[int] = []
 
-    for n in range(2, 8):  # 2..7
+    for n in range(2, 23):  # 2..22 -> 2..6 (2.1/1.1) -> 2..7 (2.01/1.01)
         try:
             pattern = generate_positions(
                 num_drones=n,
