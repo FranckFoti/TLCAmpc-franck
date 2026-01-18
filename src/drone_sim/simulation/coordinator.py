@@ -310,7 +310,7 @@ class CentralMPCGlobalCoordinator:
             room_min = np.asarray(room_min, dtype=float).reshape(3)
             room_max = np.asarray(room_max, dtype=float).reshape(3)
             # TODO, try to only do this for the first step ->
-            room_tol = 0.5
+            room_tol = 0.0
 
             for kk in range(self.horizon):
                 for i in range(M):
