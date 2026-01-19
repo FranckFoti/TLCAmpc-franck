@@ -134,7 +134,7 @@ python -m drone_sim.tools.live_view \
   --gif-fps 20
 
 python -m drone_sim.tools.live_view \
-  --config configs/4DronesHorizon2.json \
+  --config configs/4DronesHorizon8.json \
   --steps 200 \
   --trace-len 100 \
   --gif results/4DronesHorizon2.gif \
