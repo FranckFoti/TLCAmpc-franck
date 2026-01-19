@@ -41,6 +41,9 @@ All paper experiments use the same centralized MPC architecture:
   <img src="./results/2DronesHorizon2.gif" width="250" height="250" alt="2 Drones small horizon" style="margin-right: 10px;">
 </p>
 
+<details>
+<summary><strong>Json Configuration for this scenario:</strong></summary>
+
 All paper scenarios are defined in `configs/basic_paper/*.json` and follow the pattern:
 
 ```json
@@ -64,7 +67,8 @@ All paper scenarios are defined in `configs/basic_paper/*.json` and follow the p
     "type": "mpc_central",
     "params": {
       "horizon": H,
-      "safety_buffer": ...
+      "room_wall_tolerance": 0.5,
+      [...]
     }
   },
 
@@ -72,6 +76,8 @@ All paper scenarios are defined in `configs/basic_paper/*.json` and follow the p
   "obstacles": [...]
 }
 ```
+
+</details>
 
 ## 3. REST API and Live Visualization
 
@@ -128,7 +134,7 @@ python -m drone_sim.tools.live_view \
   --gif-fps 20
 
 python -m drone_sim.tools.live_view \
-  --config configs/4DronesHorizon2.json \
+  --config configs/4DronesHorizon8.json \
   --steps 200 \
   --trace-len 100 \
   --gif results/4DronesHorizon2.gif \

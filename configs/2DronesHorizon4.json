@@ -18,7 +18,7 @@
     "type": "mpc_central",
     "params": {
       "horizon": 4,
-      "safety_buffer": 0.1
+      "room_wall_tolerance": 0.5
     }
   },
 
@@ -29,6 +29,7 @@
       "target": [0.0, 2.0, 0.0],
       "radius": 0.2,
       "safety_zone": 1.0,
+      "cons_stop": 0.0,
       "drone_color": "tab:cyan"
     },
     {
@@ -37,6 +38,7 @@
       "target": [0.0, -2.0, 0.0],
       "radius": 0.2,
       "safety_zone": 1.0,
+      "cons_stop": 0.0,
       "drone_color": "purple"
     }
   ]

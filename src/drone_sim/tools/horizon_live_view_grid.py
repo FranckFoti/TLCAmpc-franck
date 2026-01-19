@@ -1,0 +1,423 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import io
+import json
+import time
+from enum import StrEnum
+from pathlib import Path
+from typing import Tuple, List
+
+import httpx
+import numpy as np
+from PIL import Image
+from httpx import Client, Response
+from pydantic_core.core_schema import JsonSchema
+
+from drone_sim.tools import _build_scenario, _COLOR_BY_DRONE_INDEX
+
+
+class Status(StrEnum):
+   RUNNING = "running"
+   FINISHED = "finished"
+   STEP_TIMEOUT = "step_timeout"
+   OVERALL_TIMEOUT = "overall_timeout"
+   INFEASIBLE = "infeasible"
+   ERROR = "error"
+
+def _apply_colors(scenario) -> None:
+   for i, drone in enumerate(scenario.drones):
+      idx = i + 1
+      color = _COLOR_BY_DRONE_INDEX.get(idx)
+      if color is None:
+         continue
+      drone.drone_color = color  # Let safety_color and trace_color default from drone_color inside the simulator.
+
+def _all_routes_finished_from_state(state: dict, pos_tol: float = 0.2, vel_tol: float = 0.1) -> bool:
+   drones = state.get("drones", [])
+   for d in drones:
+      x = np.asarray(d["x"], dtype=float)
+      p = x[:3]
+      v = x[3:]
+      p_ref = np.asarray(d["p_ref"], dtype=float)
+
+      if float(np.linalg.norm(p - p_ref)) > pos_tol:
+         return False
+      if float(np.linalg.norm(v)) > vel_tol:
+         return False
+   return True
+
+def _pairwise_distances(positions: list[np.ndarray]) -> np.ndarray:
+   n = len(positions)
+   if n <= 1:
+      return np.asarray([], dtype=float)
+
+   dists: list[float] = []
+   for i in range(n):
+      pi = positions[i]
+      for j in range(i + 1, n):
+         pj = positions[j]
+         dists.append(float(np.linalg.norm(pi - pj)))
+   return np.asarray(dists, dtype=float)
+
+def _current_state(client: Client, base_url: str, status: Status) -> Tuple[dict|None, Status]:
+   try:
+      r_state = client.get(f"{base_url}/state")
+      r_state.raise_for_status()
+   except httpx.TimeoutException:
+      return None, Status.STEP_TIMEOUT
+   except httpx.HTTPError:
+      return None, Status.ERROR
+
+   return r_state.json(), status
+
+def _next_step(client: Client, base_url: str, status: Status) -> Tuple[JsonSchema|None, Status]:
+   try:
+      r_step = client.post(f"{base_url}/step", params={"n": 1})
+      r_step.raise_for_status()
+   except httpx.TimeoutException:
+      return None, Status.STEP_TIMEOUT
+   except httpx.HTTPError:
+      return None, Status.ERROR
+
+   step_payload = r_step.json()
+   if step_payload.get("status") == "infeasible":
+      return None, Status.INFEASIBLE
+
+   return step_payload, status
+
+def _print_results_if_not_running(all_pair_dists: list[float], frames: list[Image.Image], gif_fps: float, gif_path: Path, horizon: int,
+                                  jerk_3d_value: float, num_drones: int, out_dir: Path, status: Status, step_durations: list[float],
+                                  step_mean_pair_dists: list[float], wall_time: float) -> None:
+   if status is Status.RUNNING:
+      pass
+
+   if frames:
+      duration_ms = int(round(1000.0 / max(0.1, float(gif_fps))))
+      frames[0].save(gif_path, save_all=True, append_images=frames[1:], duration=duration_ms, loop=0, optimize=False)
+   print(f"status={status}, frames={len(frames)}, wall_time={wall_time:.2f}s -> GIF: {gif_path}")
+
+   # Print metrics summary for this scenario.
+   num_steps = len(step_durations)
+
+   if num_steps > 0:
+      step_durations_arr = np.asarray(step_durations, dtype=float)
+      min_step_time = float(step_durations_arr.min())
+      max_step_time = float(step_durations_arr.max())
+      mean_step_time = float(step_durations_arr.mean())
+   else:
+      min_step_time = max_step_time = mean_step_time = 0.0
+
+   if all_pair_dists:
+      all_pair_dists_arr = np.asarray(all_pair_dists, dtype=float)
+      min_dist = float(all_pair_dists_arr.min())
+      max_dist = float(all_pair_dists_arr.max())
+      mean_dist = float(all_pair_dists_arr.mean())
+   else:
+      min_dist = max_dist = mean_dist = 0.0
+
+   if step_mean_pair_dists:
+      mean_step_mean_dist = float(np.asarray(step_mean_pair_dists, dtype=float).mean())
+   else:
+      mean_step_mean_dist = 0.0
+
+   print(f"  distances: min={min_dist:.3f}, max={max_dist:.3f}, "
+         f"mean(all pairs)={mean_dist:.3f}, mean(step mean)={mean_step_mean_dist:.3f}")
+   print(f"  jerk_3d_value (piecewise linear loss over 3D trajectories)={jerk_3d_value:.3f}")
+   print(f"  timing: steps={num_steps}, wall_time={wall_time:.3f}s, "
+         f"min_step={min_step_time:.4f}s, max_step={max_step_time:.4f}s, mean_step={mean_step_time:.4f}s")
+
+   # Write metrics to CSV (one row per scenario) in the same output directory.
+   csv_path = out_dir / "metrics.csv"
+   fieldnames = ["num_drones", "horizon", "status", "frames", "steps", "wall_time_s", "min_step_time_s",
+                 "max_step_time_s", "mean_step_time_s", "min_distance", "max_distance", "mean_distance_all_pairs",
+                 "mean_distance_step_mean", "jerk_3d_value"]
+   row = {"num_drones": num_drones, "horizon": horizon, "status": status, "frames": len(frames), "steps": num_steps,
+          "wall_time_s": wall_time, "min_step_time_s": min_step_time, "max_step_time_s": max_step_time,
+          "mean_step_time_s": mean_step_time, "min_distance": min_dist, "max_distance": max_dist,
+          "mean_distance_all_pairs": mean_dist, "mean_distance_step_mean": mean_step_mean_dist, "jerk_3d_value": jerk_3d_value}
+   # Append with header creation if needed.
+   write_header = not csv_path.exists()
+   with csv_path.open("a", newline="", encoding="utf-8") as f:
+      writer = csv.DictWriter(f, fieldnames=fieldnames)
+      if write_header:
+         writer.writeheader()
+      writer.writerow(row)
+
+def _render_image(client: Client, base_url: str, width: int, height: int, dpi: int, elev: float, azim: float, frames: list[Image.Image]) -> Tuple[list[Image.Image], Status]:
+   try:
+      r_img = client.get(f"{base_url}/render", params={"width": width, "height": height, "dpi": dpi, "elev": elev, "azim": azim, "trace_len": 50})
+      r_img.raise_for_status()
+   except httpx.TimeoutException:
+      return frames, Status.STEP_TIMEOUT
+   except httpx.HTTPError:
+      return frames, Status.ERROR
+
+   img = Image.open(io.BytesIO(r_img.content)).convert("RGBA")
+   frames.append(img)
+
+   return frames, Status.RUNNING
+
+def _load_config(base_url: str, cfg_dict, client: Client, status: Status) -> Status:
+   try:
+      r = client.post(f"{base_url}/config", content=json.dumps(cfg_dict), headers={"Content-Type": "application/json"})
+      r.raise_for_status()
+   except httpx.TimeoutException:
+      return Status.STEP_TIMEOUT
+   except httpx.HTTPError:
+      return Status.ERROR
+
+   return status
+
+def piecewise_linear_loss_3d(points, penalty=1.0, eps_step=1e-6, angle_threshold_deg=90.0):
+   """
+   Piecewise-linear fit of a 3D trajectory with penalties for direction turnarounds.
+
+   Args:
+       points: array-like of shape (n, 3)
+           Sequence of 3D points [x_i, y_i, z_i].
+       penalty: float
+           Cost added for each turnaround (i.e. each break between line segments).
+       eps_step: float
+           Threshold to treat very small step vectors as zero (noise).
+       angle_threshold_deg: float
+           Angle (in degrees) at or above which the change in direction is considered a "turnaround" and causes a new segment to start.
+           Default 90°, i.e. direction flips from "mostly one way" to "mostly the opposite way".
+
+   Returns:
+       loss: float
+           Total loss = sum of squared Euclidean errors to piecewise-linear fit
+           + penalty * (# of breaks).
+       fitted: ndarray of shape (n, 3)
+           Smoothed/fitted 3D points.
+       segment_starts: list[int]
+           Indices where each segment starts (0 is always included).
+   """
+   pts = np.asarray(points, dtype=float)
+   if pts.ndim != 2 or pts.shape[1] != 3:
+      raise ValueError("points must have shape (n, 3)")
+
+   n = pts.shape[0]
+   if n < 2:
+      # Nothing to fit
+      return 0.0, pts.copy(), [0]
+
+   # Parameter along the path (could be time or just index)
+   t = np.arange(n, dtype=float)
+
+   # 1. Detect turnarounds based on 3D direction changes
+   steps = np.diff(pts, axis=0)  # (n-1, 3)
+   # Zero out tiny step components to reduce numerical noise
+   steps[np.abs(steps) < eps_step] = 0.0
+
+   # Compute unit direction vectors for non-zero steps
+   step_norms = np.linalg.norm(steps, axis=1)
+   dirs = np.zeros_like(steps)
+   nonzero_mask = step_norms > eps_step
+   dirs[nonzero_mask] = steps[nonzero_mask] / step_norms[nonzero_mask, None]
+
+   cos_threshold = np.cos(np.deg2rad(angle_threshold_deg))
+
+   breaks = [0]  # segment start indices
+
+   for i in range(1, len(dirs)):
+      d_prev = dirs[i - 1]
+      d_cur = dirs[i]
+
+      # Skip if either direction is basically undefined (zero step)
+      if (np.linalg.norm(d_prev) < eps_step or np.linalg.norm(d_cur) < eps_step):
+         continue
+
+      # cos(theta) = d_prev · d_cur (both unit vectors)
+      cos_angle = float(np.dot(d_prev, d_cur))
+
+      # Turnaround if angle >= angle_threshold_deg
+      if cos_angle < cos_threshold:
+         # New segment starts at index i
+         breaks.append(i)
+
+   breaks.append(n)  # sentinel for the last segment end
+
+   # 2. Fit line (3D) on each segment and accumulate squared error
+   fitted = np.zeros_like(pts)
+   sq_err = 0.0
+
+   for s in range(len(breaks) - 1):
+      start = breaks[s]
+      end = breaks[s + 1]
+
+      t_seg = t[start:end]  # shape (m,)
+      pts_seg = pts[start:end]  # shape (m, 3)
+
+      if end - start == 1:
+         # Single point segment: nothing to fit
+         fitted[start:end] = pts_seg
+         continue
+
+      # Design matrix for linear model: pts ≈ a * t + b
+      # A has shape (m, 2)
+      A = np.vstack([t_seg, np.ones_like(t_seg)]).T
+
+      # Solve for a and b for all 3 dims at once: shape coeffs = (2, 3)
+      coeffs, *_ = np.linalg.lstsq(A, pts_seg, rcond=None)
+      a = coeffs[0]  # (3,)
+      b = coeffs[1]  # (3,)
+
+      # Fitted points on this segment
+      fit_seg = (a[None, :] * t_seg[:, None]) + b[None, :]  # (m, 3)
+      fitted[start:end] = fit_seg
+
+      # Squared Euclidean error
+      sq_err += np.sum((pts_seg - fit_seg) ** 2)
+
+   num_segments = len(breaks) - 1
+   num_breaks = max(0, num_segments - 1)
+   loss = sq_err + penalty * num_breaks
+
+   segment_starts = breaks[:-1]
+
+   return loss, fitted, segment_starts
+
+def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: str = "http://127.0.0.1:8000", out_dir: Path, max_steps: int = 500,
+                                  per_request_timeout_s: float = 360.0, total_timeout_s: float = 600.0, gif_fps: float = 20.0, width: int = 900, height: int = 700,
+                                  dpi: int = 120, elev: float = 20.0, azim: float = -60.0) -> None:
+   """
+   Run one (N, H) pair through the REST API and create a GIF.
+
+   Returns (status, num_frames, wall_time_seconds), where status is one of:
+     - "finished"           all drones reached their targets (heuristic)
+     - "max_steps"          hit max_steps
+     - "overall_timeout"    exceeded total_timeout_s
+     - "step_timeout"       an HTTP request exceeded per_request_timeout_s
+     - "infeasible"         central MPC reported infeasible
+     - "error"              unexpected HTTP error
+   """
+
+   # Build the same ScenarioConfig as test_horizon_feasibility, then patch colors.
+   scenario = _build_scenario(num_drones=num_drones, horizon=horizon)
+   _apply_colors(scenario)
+
+   cfg_dict = scenario.model_dump(mode="json")
+
+   out_dir.mkdir(parents=True, exist_ok=True)
+   gif_path = out_dir / f"N{num_drones}_H{horizon}.gif"
+
+   status = Status.RUNNING
+
+   timeout = httpx.Timeout(per_request_timeout_s)
+   t0 = time.perf_counter()
+
+   # Metrics accumulators
+   step_durations: list[float] = []
+   step_mean_pair_dists: list[float] = []
+   all_pair_dists: list[float] = []
+
+   frames: list[Image.Image] = []
+
+   # For 3D jerk metric: store full position history per drone.
+   positions_by_drone: dict[str, list[np.ndarray]] = {}
+
+   def _compute_jerk_3d_value() -> float:
+      jerk_3d_total = 0.0
+      for traj in positions_by_drone.values():
+         if len(traj) < 2:
+            continue
+         pts = np.stack(traj, axis=0)
+         loss, _, _ = piecewise_linear_loss_3d(pts)
+         jerk_3d_total += float(loss)
+      return jerk_3d_total
+
+   with httpx.Client(timeout=timeout) as client:
+      wall_time = time.perf_counter() - t0
+      # Load config
+      status = _load_config(base_url, cfg_dict, client, status)
+
+      for step_idx in range(max_steps):
+            if status is Status.RUNNING:
+               frames, status = _render_image(client, base_url, width, height, dpi, elev, azim, frames)
+            if status is not Status.RUNNING:
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+               break
+
+            now_global = time.perf_counter()
+            if now_global - t0 > total_timeout_s:
+               status = Status.OVERALL_TIMEOUT
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+               break
+
+            t_step0 = time.perf_counter()
+
+            # Advance simulation by one step.
+            step_payload, status = _next_step(client, base_url, status)
+            if status in [Status.STEP_TIMEOUT, Status.ERROR, Status.INFEASIBLE]:
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+               break
+
+            # Check termination and collect metrics based on /state.
+            state, status = _current_state(client, base_url, status)
+            if status in [Status.STEP_TIMEOUT, Status.ERROR]:
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+               break
+
+            drones_state = state.get("drones", [])
+            drones_state_sorted = sorted(drones_state, key=lambda d: d["drone_id"])
+
+            positions: list[np.ndarray] = []
+            for d in drones_state_sorted:
+               x = np.asarray(d["x"], dtype=float)
+               p = x[:3]
+               v = x[3:]
+               positions.append(p)
+
+               did = d["drone_id"]
+
+               # Store full position history per drone for 3D jerk metric.
+               traj = positions_by_drone.setdefault(did, [])
+               traj.append(p)
+
+            # Pairwise distance metrics.
+            dists = _pairwise_distances(positions)
+            if dists.size > 0:
+               all_pair_dists.extend(dists.tolist())
+               step_mean_pair_dists.append(float(dists.mean()))
+
+            if _all_routes_finished_from_state(state):
+               status = Status.FINISHED
+
+            t_step1 = time.perf_counter()
+            step_durations.append(t_step1 - t_step0)
+
+
+def main(argv: list[str] | None = None) -> None:
+   p = argparse.ArgumentParser(description="Run the predefined horizon-feasibility scenarios via the REST API and create live-view GIFs for N=2..7, H=1..10.")
+
+   p.add_argument("--base-url", default="http://127.0.0.1:8000", help="Base URL of the running DroneSim REST API")
+   p.add_argument("--out-dir", type=Path, default=Path("live_view_horizon_grid/results"), help="Directory where GIFs will be written (one per N,H pair)")
+   p.add_argument("--max-steps", type=int, default=500, help="Per-scenario maximum number of simulation steps")
+   p.add_argument("--step-timeout", type=float, default=60.0, help="Maximum wall time in seconds per HTTP request (config/step/state/render)")
+   p.add_argument("--total-timeout", type=float, default=360.0, help="Maximum total wall time in seconds per scenario before aborting")
+   p.add_argument("--gif-fps", type=float, default=20.0, help="FPS for generated GIFs")
+
+   args = p.parse_args(argv)
+
+   drone_counts = range(2, 8)
+   horizons = range(1, 21)
+
+   print(f"Running live-view GIF grid for N in {list(drone_counts)}, H in {list(horizons)}")
+   print(f"Base URL: {args.base_url}")
+   print(f"Output directory: {args.out_dir}")
+
+   for n in drone_counts:
+      for H in horizons:
+         print(f"=== Scenario N={n}, H={H} ===")
+         run_single_scenario_live_view(num_drones=n, horizon=H, base_url=args.base_url, out_dir=args.out_dir, max_steps=args.max_steps,
+                                       per_request_timeout_s=args.step_timeout, total_timeout_s=args.total_timeout, gif_fps=args.gif_fps)
+
+
+if __name__ == "__main__":
+   main()
