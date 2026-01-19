@@ -87,8 +87,9 @@ def _next_step(client: Client, base_url: str, status: Status) -> Tuple[JsonSchem
 
    return step_payload, status
 
-def _print_results_if_not_running(all_pair_dists: list[float], frames: list[Image.Image], gif_fps: float, gif_path: Path, horizon: int, jerk_values:list[float],
-                   num_drones: int, out_dir: Path, status: Status, step_durations: list[float], step_mean_pair_dists: list[float], wall_time: float) -> None:
+def _print_results_if_not_running(all_pair_dists: list[float], frames: list[Image.Image], gif_fps: float, gif_path: Path, horizon: int,
+                                  jerk_3d_value: float, num_drones: int, out_dir: Path, status: Status, step_durations: list[float],
+                                  step_mean_pair_dists: list[float], wall_time: float) -> None:
    if status is Status.RUNNING:
       pass
 
@@ -121,17 +122,9 @@ def _print_results_if_not_running(all_pair_dists: list[float], frames: list[Imag
    else:
       mean_step_mean_dist = 0.0
 
-   if jerk_values:
-      jerk_arr = np.asarray(jerk_values, dtype=float)
-      jerk_min = float(jerk_arr.min())
-      jerk_max = float(jerk_arr.max())
-      jerk_mean = float(jerk_arr.mean())
-   else:
-      jerk_min = jerk_max = jerk_mean = 0.0
-
    print(f"  distances: min={min_dist:.3f}, max={max_dist:.3f}, "
          f"mean(all pairs)={mean_dist:.3f}, mean(step mean)={mean_step_mean_dist:.3f}")
-   print(f"  jerk-like: min={jerk_min:.5f}, max={jerk_max:.5f}, mean={jerk_mean:.5f} (||Δ²v||/dt²)")
+   print(f"  jerk_3d_value (piecewise linear loss over 3D trajectories)={jerk_3d_value:.3f}")
    print(f"  timing: steps={num_steps}, wall_time={wall_time:.3f}s, "
          f"min_step={min_step_time:.4f}s, max_step={max_step_time:.4f}s, mean_step={mean_step_time:.4f}s")
 
@@ -139,12 +132,11 @@ def _print_results_if_not_running(all_pair_dists: list[float], frames: list[Imag
    csv_path = out_dir / "metrics.csv"
    fieldnames = ["num_drones", "horizon", "status", "frames", "steps", "wall_time_s", "min_step_time_s",
                  "max_step_time_s", "mean_step_time_s", "min_distance", "max_distance", "mean_distance_all_pairs",
-                 "mean_distance_step_mean", "jerk_min", "jerk_max", "jerk_mean", ]
+                 "mean_distance_step_mean", "jerk_3d_value"]
    row = {"num_drones": num_drones, "horizon": horizon, "status": status, "frames": len(frames), "steps": num_steps,
           "wall_time_s": wall_time, "min_step_time_s": min_step_time, "max_step_time_s": max_step_time,
           "mean_step_time_s": mean_step_time, "min_distance": min_dist, "max_distance": max_dist,
-          "mean_distance_all_pairs": mean_dist, "mean_distance_step_mean": mean_step_mean_dist, "jerk_min": jerk_min,
-          "jerk_max": jerk_max, "jerk_mean": jerk_mean, }
+          "mean_distance_all_pairs": mean_dist, "mean_distance_step_mean": mean_step_mean_dist, "jerk_3d_value": jerk_3d_value}
    # Append with header creation if needed.
    write_header = not csv_path.exists()
    with csv_path.open("a", newline="", encoding="utf-8") as f:
@@ -177,6 +169,115 @@ def _load_config(base_url: str, cfg_dict, client: Client, status: Status) -> Sta
       return Status.ERROR
 
    return status
+
+def piecewise_linear_loss_3d(points, penalty=1.0, eps_step=1e-6, angle_threshold_deg=90.0):
+   """
+   Piecewise-linear fit of a 3D trajectory with penalties for direction turnarounds.
+
+   Args:
+       points: array-like of shape (n, 3)
+           Sequence of 3D points [x_i, y_i, z_i].
+       penalty: float
+           Cost added for each turnaround (i.e. each break between line segments).
+       eps_step: float
+           Threshold to treat very small step vectors as zero (noise).
+       angle_threshold_deg: float
+           Angle (in degrees) at or above which the change in direction is considered a "turnaround" and causes a new segment to start.
+           Default 90°, i.e. direction flips from "mostly one way" to "mostly the opposite way".
+
+   Returns:
+       loss: float
+           Total loss = sum of squared Euclidean errors to piecewise-linear fit
+           + penalty * (# of breaks).
+       fitted: ndarray of shape (n, 3)
+           Smoothed/fitted 3D points.
+       segment_starts: list[int]
+           Indices where each segment starts (0 is always included).
+   """
+   pts = np.asarray(points, dtype=float)
+   if pts.ndim != 2 or pts.shape[1] != 3:
+      raise ValueError("points must have shape (n, 3)")
+
+   n = pts.shape[0]
+   if n < 2:
+      # Nothing to fit
+      return 0.0, pts.copy(), [0]
+
+   # Parameter along the path (could be time or just index)
+   t = np.arange(n, dtype=float)
+
+   # 1. Detect turnarounds based on 3D direction changes
+   steps = np.diff(pts, axis=0)  # (n-1, 3)
+   # Zero out tiny step components to reduce numerical noise
+   steps[np.abs(steps) < eps_step] = 0.0
+
+   # Compute unit direction vectors for non-zero steps
+   step_norms = np.linalg.norm(steps, axis=1)
+   dirs = np.zeros_like(steps)
+   nonzero_mask = step_norms > eps_step
+   dirs[nonzero_mask] = steps[nonzero_mask] / step_norms[nonzero_mask, None]
+
+   cos_threshold = np.cos(np.deg2rad(angle_threshold_deg))
+
+   breaks = [0]  # segment start indices
+
+   for i in range(1, len(dirs)):
+      d_prev = dirs[i - 1]
+      d_cur = dirs[i]
+
+      # Skip if either direction is basically undefined (zero step)
+      if (np.linalg.norm(d_prev) < eps_step or np.linalg.norm(d_cur) < eps_step):
+         continue
+
+      # cos(theta) = d_prev · d_cur (both unit vectors)
+      cos_angle = float(np.dot(d_prev, d_cur))
+
+      # Turnaround if angle >= angle_threshold_deg
+      if cos_angle < cos_threshold:
+         # New segment starts at index i
+         breaks.append(i)
+
+   breaks.append(n)  # sentinel for the last segment end
+
+   # 2. Fit line (3D) on each segment and accumulate squared error
+   fitted = np.zeros_like(pts)
+   sq_err = 0.0
+
+   for s in range(len(breaks) - 1):
+      start = breaks[s]
+      end = breaks[s + 1]
+
+      t_seg = t[start:end]  # shape (m,)
+      pts_seg = pts[start:end]  # shape (m, 3)
+
+      if end - start == 1:
+         # Single point segment: nothing to fit
+         fitted[start:end] = pts_seg
+         continue
+
+      # Design matrix for linear model: pts ≈ a * t + b
+      # A has shape (m, 2)
+      A = np.vstack([t_seg, np.ones_like(t_seg)]).T
+
+      # Solve for a and b for all 3 dims at once: shape coeffs = (2, 3)
+      coeffs, *_ = np.linalg.lstsq(A, pts_seg, rcond=None)
+      a = coeffs[0]  # (3,)
+      b = coeffs[1]  # (3,)
+
+      # Fitted points on this segment
+      fit_seg = (a[None, :] * t_seg[:, None]) + b[None, :]  # (m, 3)
+      fitted[start:end] = fit_seg
+
+      # Squared Euclidean error
+      sq_err += np.sum((pts_seg - fit_seg) ** 2)
+
+   num_segments = len(breaks) - 1
+   num_breaks = max(0, num_segments - 1)
+   loss = sq_err + penalty * num_breaks
+
+   segment_starts = breaks[:-1]
+
+   return loss, fitted, segment_starts
 
 def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: str = "http://127.0.0.1:8000", out_dir: Path, max_steps: int = 500,
                                   per_request_timeout_s: float = 360.0, total_timeout_s: float = 600.0, gif_fps: float = 20.0, width: int = 900, height: int = 700,
@@ -212,11 +313,20 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: st
    step_mean_pair_dists: list[float] = []
    all_pair_dists: list[float] = []
 
-   # For jerk-like metric, keep last 3 velocity vectors per drone id.
-   vel_history: dict[str, list[np.ndarray]] = {}
-   jerk_values: list[float] = []
-   dt_state: float = None
    frames: list[Image.Image] = []
+
+   # For 3D jerk metric: store full position history per drone.
+   positions_by_drone: dict[str, list[np.ndarray]] = {}
+
+   def _compute_jerk_3d_value() -> float:
+      jerk_3d_total = 0.0
+      for traj in positions_by_drone.values():
+         if len(traj) < 2:
+            continue
+         pts = np.stack(traj, axis=0)
+         loss, _, _ = piecewise_linear_loss_3d(pts)
+         jerk_3d_total += float(loss)
+      return jerk_3d_total
 
    with httpx.Client(timeout=timeout) as client:
       wall_time = time.perf_counter() - t0
@@ -227,12 +337,15 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: st
             if status is Status.RUNNING:
                frames, status = _render_image(client, base_url, width, height, dpi, elev, azim, frames)
             if status is not Status.RUNNING:
-               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_values, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
                break
 
             now_global = time.perf_counter()
             if now_global - t0 > total_timeout_s:
                status = Status.OVERALL_TIMEOUT
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
                break
 
             t_step0 = time.perf_counter()
@@ -240,19 +353,15 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: st
             # Advance simulation by one step.
             step_payload, status = _next_step(client, base_url, status)
             if status in [Status.STEP_TIMEOUT, Status.ERROR, Status.INFEASIBLE]:
-               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_values, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
                break
-
-            if dt_state is None:
-               try:
-                  dt_state = float(step_payload.get("dt", 0.0)) or None
-               except (TypeError, ValueError):
-                  dt_state = None
 
             # Check termination and collect metrics based on /state.
             state, status = _current_state(client, base_url, status)
             if status in [Status.STEP_TIMEOUT, Status.ERROR]:
-               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_values, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+               jerk_3d_value = _compute_jerk_3d_value()
+               _print_results_if_not_running(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time)
                break
 
             drones_state = state.get("drones", [])
@@ -266,16 +375,10 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: st
                positions.append(p)
 
                did = d["drone_id"]
-               hist = vel_history.setdefault(did, [])
-               hist.append(v)
-               if len(hist) > 3:
-                  hist.pop(0)
 
-               # Discrete jerk approximation once we have 3 velocity samples.
-               if dt_state is not None and len(hist) == 3:
-                  v_prev2, v_prev1, v_curr = hist
-                  jerk_vec = (v_curr - 2.0 * v_prev1 + v_prev2) / (dt_state ** 2)
-                  jerk_values.append(float(np.linalg.norm(jerk_vec)))
+               # Store full position history per drone for 3D jerk metric.
+               traj = positions_by_drone.setdefault(did, [])
+               traj.append(p)
 
             # Pairwise distance metrics.
             dists = _pairwise_distances(positions)
