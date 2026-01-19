@@ -17,7 +17,8 @@
   "coordinator": {
     "type": "mpc_central",
     "params": {
-      "horizon": 10
+      "horizon": 10,
+      "room_wall_tolerance": 0.5
     }
   },
 
