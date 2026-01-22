@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 ColorValue = str | list[float]
 
@@ -43,16 +43,6 @@ class DroneConfig(BaseModel):
    safety_color: ColorValue | None = None
    # If omitted, the renderer uses the drone_color.
    trace_color: ColorValue | None = None
-
-   @classmethod
-   def _validate_color(cls, v: ColorValue | None) -> ColorValue | None:
-      if v is None:
-         return None
-      if isinstance(v, str):
-         return v
-      if not isinstance(v, list) or len(v) != 3:
-         raise ValueError("color must be a string or an RGB list of length 3")
-      return [float(x) for x in v]
 
 
 class ObstacleConfig(BaseModel):

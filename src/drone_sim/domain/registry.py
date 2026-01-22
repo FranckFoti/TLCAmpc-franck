@@ -39,31 +39,23 @@ def register_coordinator(name: str) -> Callable[[Factory[Any]], Factory[Any]]:
    return _decorator
 
 
-def create_physics(spec: dict[str, Any]) -> Any:
+def _create_from_registry(spec: dict[str, Any], registry: dict[str, Factory[Any]], kind: str) -> Any:
    t = spec.get("type")
    if not t:
-      raise ValueError("physics spec must include 'type'")
-   if t not in _PHYSICS:
-      raise ValueError(f"Unknown physics type: {t}")
+      raise ValueError(f"{kind} spec must include 'type'")
+   if t not in registry:
+      raise ValueError(f"Unknown {kind} type: {t}")
    params = dict(spec.get("params") or {})
-   return _PHYSICS[t](**params)
+   return registry[t](**params)
+
+
+def create_physics(spec: dict[str, Any]) -> Any:
+   return _create_from_registry(spec, _PHYSICS, "physics")
 
 
 def create_controller(spec: dict[str, Any]) -> Any:
-   t = spec.get("type")
-   if not t:
-      raise ValueError("controller spec must include 'type'")
-   if t not in _CONTROLLERS:
-      raise ValueError(f"Unknown controller type: {t}")
-   params = dict(spec.get("params") or {})
-   return _CONTROLLERS[t](**params)
+   return _create_from_registry(spec, _CONTROLLERS, "controller")
 
 
 def create_coordinator(spec: dict[str, Any]) -> Any:
-   t = spec.get("type")
-   if not t:
-      raise ValueError("coordinator spec must include 'type'")
-   if t not in _COORDINATORS:
-      raise ValueError(f"Unknown coordinator type: {t}")
-   params = dict(spec.get("params") or {})
-   return _COORDINATORS[t](**params)
+   return _create_from_registry(spec, _COORDINATORS, "coordinator")

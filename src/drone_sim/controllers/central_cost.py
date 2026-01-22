@@ -83,14 +83,11 @@ class CentralMPCAgent(Controller):
 
       total = 0.0
       for k in range(u_seq.shape[0]):
-         u = u_seq[k].reshape(3)
+         u = u_seq[k]
          x = self._phys.A @ x + self._phys.B @ u
-         e = (x[:3] - p_ref).reshape(3, 1)
-         total += float((e.T @ self._Qp @ e).item())
-         v = x[3:].reshape(3, 1)
-         total += float((v.T @ self._Qv @ v).item())
-         uk = u.reshape(3, 1)
-         total += float((uk.T @ self._R @ uk).item())
+         e = x[:3] - p_ref
+         v = x[3:]
+         total += float(e @ self._Qp @ e + v @ self._Qv @ v + u @ self._R @ u)
 
       return float(total)
 

@@ -15,18 +15,16 @@ def _normalize_color(c: ColorValue) -> str | tuple[float, float, float]:
       return c
 
    rgb = [float(x) for x in c]
-   mx = max(rgb)
-   if mx > 1.0:
+   if max(rgb) > 1.0:
       rgb = [x / 255.0 for x in rgb]
 
-   rgb = [min(1.0, max(0.0, x)) for x in rgb]
-   return (rgb[0], rgb[1], rgb[2])
+   return tuple(min(1.0, max(0.0, x)) for x in rgb)
 
 
 def _color_to_json(c: str | tuple[float, float, float]) -> str | list[float]:
    if isinstance(c, str):
       return c
-   return [float(c[0]), float(c[1]), float(c[2])]
+   return [float(x) for x in c]
 
 
 @dataclass
@@ -85,13 +83,14 @@ class Simulator:
          x0[:3] = start
 
          route = Route(waypoints=[np.asarray(w, dtype=float) for w in drone_cfg.waypoints],
-               target=np.asarray(drone_cfg.target, dtype=float), )
+                       target=np.asarray(drone_cfg.target, dtype=float), )
          drone_color = _normalize_color(drone_cfg.drone_color)
          safety_color = _normalize_color(drone_cfg.safety_color or drone_cfg.drone_color)
          trace_color = _normalize_color(drone_cfg.trace_color or drone_cfg.drone_color)
 
-         drones.append(Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone, cons_stop=drone_cfg.cons_stop,
-                             color=drone_color, safety_color=safety_color, trace_color=trace_color, controller=controller, x=x0, route=route))
+         drones.append(Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone,
+                             cons_stop=drone_cfg.cons_stop, color=drone_color, safety_color=safety_color,
+                             trace_color=trace_color, controller=controller, x=x0, route=route))
 
       obstacles = [(np.asarray(o.center, dtype=float), float(o.radius)) for o in cfg.obstacles]
 
@@ -181,26 +180,30 @@ class Simulator:
          # All Paper/"basic_paper" configs provide `coordinator: {"type": "mpc_central", ...}`.
          # If a scenario omits the coordinator, we fail fast instead of silently running a different control scheme.
          if self.coordinator is None:
-            raise RuntimeError("Simulator-step requires a coordinator (centralized MPC). Provide `coordinator` in ScenarioConfig.")
+            raise RuntimeError(
+               "Simulator-step requires a coordinator (centralized MPC). Provide `coordinator` in ScenarioConfig.")
 
          # First compute per-drone local controls (used for non-optimized drones, and as a fallback).
          for i, d in enumerate(self.drones):
-            neighbors = [(positions[j], velocities[j], self.drones[j].radius, self.drones[j].safety_zone, prefs[j],) for j in range(len(self.drones)) if j != i]
+            neighbors = [(positions[j], velocities[j], self.drones[j].radius, self.drones[j].safety_zone, prefs[j],) for
+                         j in range(len(self.drones)) if j != i]
 
             if hasattr(d.controller, "control"):
-               u = d.controller.control(d.x, prefs[i], neighbors, self.obstacles, self_radius=d.radius, self_safety_zone=d.safety_zone)
+               u = d.controller.control(d.x, prefs[i], neighbors, self.obstacles, self_radius=d.radius,
+                                        self_safety_zone=d.safety_zone)
             else:
                u = np.zeros(3, dtype=float)
             us.append(np.asarray(u, dtype=float).reshape(3))
 
          # Then override optimized drones with coordinator outputs.
-         all_drone_state = {d.drone_id: (positions[i], velocities[i], float(d.radius)) for i, d in enumerate(self.drones)}
+         all_drone_state = {d.drone_id: (positions[i], velocities[i], float(d.radius)) for i, d in
+                            enumerate(self.drones)}
 
          try:
-            u_by_id = self.coordinator.solve_controls(drone_ids=[d.drone_id for d in self.drones],
-                  xs=[d.x for d in self.drones], prefs=prefs, radii=[d.radius for d in self.drones],
-                  safety_zones=[d.safety_zone for d in self.drones], cons_stops=[d.cons_stop for d in self.drones], controllers=[d.controller for d in self.drones],
-                  obstacles=self.obstacles, all_drone_state=all_drone_state, room_min=self.room_min, room_max=self.room_max)
+            u_by_id = self.coordinator.solve_controls(drone_ids=[d.drone_id for d in self.drones], xs=[d.x for d in self.drones], prefs=prefs,
+                                                      radii=[d.radius for d in self.drones], safety_zones=[d.safety_zone for d in self.drones],
+                                                      cons_stops=[d.cons_stop for d in self.drones], controllers=[d.controller for d in self.drones],
+                                                      obstacles=self.obstacles, all_drone_state=all_drone_state, room_min=self.room_min, room_max=self.room_max)
 
          except RuntimeError as exc:
             # Mark the step as infeasible (e.g. walls/obstacles make the optimization problem infeasible) and abort this step without advancing the simulation time.
@@ -231,7 +234,7 @@ class Simulator:
             trace = self.traces.setdefault(d.drone_id, [])
             trace.append(d.position().copy())
             if len(trace) > self.trace_len:
-               del trace[: len(trace) - self.trace_len]
+               del trace[:-self.trace_len]
 
          self.last_collisions = self._compute_collisions()
 
@@ -241,12 +244,10 @@ class Simulator:
          self.compute_time_s += time.perf_counter() - t0
 
    def to_dict(self) -> dict:
-      return {
-            "t": self.t, "dt": self.dt,
-            "room": {"min": self.room_min.tolist(), "max": self.room_max.tolist()},
-            "drones": [{"drone_id": d.drone_id, "x": d.x.tolist(), "route_idx": d.route.idx, "p_ref": d.route.current_ref().tolist(), "radius": d.radius,
-                        "safety_zone": d.safety_zone, "drone_color": _color_to_json(d.color), "safety_color": _color_to_json(d.safety_color),
+      return {"t": self.t, "dt": self.dt, "room": {"min": self.room_min.tolist(), "max": self.room_max.tolist()},
+            "drones": [{"drone_id": d.drone_id, "x": d.x.tolist(), "route_idx": d.route.idx,
+                        "p_ref": d.route.current_ref().tolist(), "radius": d.radius, "safety_zone": d.safety_zone,
+                        "drone_color": _color_to_json(d.color), "safety_color": _color_to_json(d.safety_color),
                         "trace_color": _color_to_json(d.trace_color)} for d in self.drones],
             "obstacles": [{"center": c.tolist(), "radius": r} for c, r in self.obstacles],
-            "collisions": list(self.last_collisions)
-      }
+            "collisions": list(self.last_collisions)}

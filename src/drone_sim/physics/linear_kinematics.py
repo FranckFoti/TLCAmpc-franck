@@ -29,10 +29,8 @@ class LinearKinematicsPhysics(PhysicsModel):
    """
 
    def __post_init__(self) -> None:
-      self.A = np.block([[np.eye(3), self.dt * np.eye(3)], [np.zeros((3, 3)), np.eye(3)], ])
-
-      # Keep the reshape to match the spec exactly
-      self.B = np.block([[0.5 * self.dt ** 2 * np.eye(3)], [self.dt * np.eye(3)], ]).reshape(6, 3)
+      self.A = np.block([[np.eye(3), self.dt * np.eye(3)], [np.zeros((3, 3)), np.eye(3)]])
+      self.B = np.block([[0.5 * self.dt ** 2 * np.eye(3)], [self.dt * np.eye(3)]])
 
    def step(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
       x = np.asarray(x, dtype=float).reshape(6)

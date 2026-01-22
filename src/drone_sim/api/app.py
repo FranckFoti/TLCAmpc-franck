@@ -42,7 +42,7 @@ def step(n: int = 1) -> StepResponse:
       if _sim.infeasible:
          # Central MPC reported an infeasible optimization problem (e.g. walls or obstacles blocking all routes).
          # Surface this as a structured status instead of a generic 500 error.
-         return StepResponse(status="infeasible", t=_sim.t, dt=_sim.dt, detail=_sim.infeasible_reason, )
+         return StepResponse(status="infeasible", t=_sim.t, dt=_sim.dt, detail=_sim.infeasible_reason)
    return StepResponse(status="stepped", t=_sim.t, dt=_sim.dt)
 
 
@@ -53,9 +53,9 @@ def state() -> StateResponse:
    return StateResponse.model_validate(_sim.to_dict())
 
 
-@app.get("/render", tags=["visualization"], responses={200: {"content": {"image/png": {}}}}, )
+@app.get("/render", tags=["visualization"], responses={200: {"content": {"image/png": {}}}})
 def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0,
-           trace_len: int = 300, ) -> Response:
+           trace_len: int = 300) -> Response:
    """Render the current state as a PNG image."""
 
    if _sim is None:
@@ -64,12 +64,7 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
    if trace_len < 0:
       raise HTTPException(status_code=422, detail="trace_len must be >= 0")
 
-   drone_ids = [d.drone_id for d in _sim.drones]
-
-   if trace_len == 0:
-      traces = [[] for _ in drone_ids]
-   else:
-      traces = [_sim.traces.get(drone_id, [])[-trace_len:] for drone_id in drone_ids]
+   traces = [[] if trace_len == 0 else _sim.traces.get(d.drone_id, [])[-trace_len:] for d in _sim.drones]
 
    # Use fixed safety zones as defined on each drone (no velocity-dependent adjustment).
    safety_zones = [float(d.safety_zone) for d in _sim.drones]
@@ -79,6 +74,6 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
                     drone_colors=[d.color for d in _sim.drones], safety_colors=[d.safety_color for d in _sim.drones],
                     trace_colors=[d.trace_color for d in _sim.drones], drone_traces=traces, obstacles=_sim.obstacles,
                     step_count=_sim.step_count, compute_time_s=_sim.compute_time_s, width=width, height=height, dpi=dpi,
-                    elev=elev, azim=azim, )
+                    elev=elev, azim=azim)
 
    return Response(content=png, media_type="image/png")
