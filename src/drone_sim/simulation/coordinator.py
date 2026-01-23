@@ -8,7 +8,7 @@ from drone_sim.domain.registry import register_coordinator
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 
 
-def _predict_external_const_vel(p0: np.ndarray, v0: np.ndarray, dt: float, horizon: int) -> np.ndarray:
+def predict_external_const_vel(p0: np.ndarray, v0: np.ndarray, dt: float, horizon: int) -> np.ndarray:
    p0 = np.asarray(p0, dtype=float).reshape(3)
    v0 = np.asarray(v0, dtype=float).reshape(3)
    Ps = [p0 + (k + 1) * float(dt) * v0 for k in range(horizon)]
@@ -154,7 +154,7 @@ class CentralMPCGlobalCoordinator:
          if did not in all_drone_state:
             continue
          p0, v0, _r = all_drone_state[did]
-         ext_pred[did] = _predict_external_const_vel(p0=p0, v0=v0, dt=self.dt, horizon=self.horizon)
+         ext_pred[did] = predict_external_const_vel(p0=p0, v0=v0, dt=self.dt, horizon=self.horizon)
 
       # Warm-start: shift previous solution if available
       u0 = np.zeros((M, self.horizon, 3), dtype=float)

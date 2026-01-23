@@ -117,32 +117,6 @@ python -m drone_sim.tools.live_view \
   --gif-fps 20
 ```
 
-Recommended: create a dedicated directory for the paper figures:
-
-```bash
-mkdir -p results
-```
-
-Analogous commands can be used for the other paper scenarios:
-
-```bash
-python -m drone_sim.tools.live_view \
-  --config configs/2DronesHorizon4.json \
-  --steps 200 \
-  --trace-len 100 \
-  --gif results/2DronesHorizon4.gif \
-  --gif-fps 20
-
-python -m drone_sim.tools.live_view \
-  --config configs/4DronesHorizon8.json \
-  --steps 200 \
-  --trace-len 100 \
-  --gif results/4DronesHorizon2.gif \
-  --gif-fps 20
-
-# similarly for the 3/4/5/6/7/8/9-drone configurations
-```
-
 The results for the given json configuration are those:
 <p align="center">
   <img src="./results/4DronesHorizon1.gif" width="250" height="250" alt="4 Drones Horizon 1" style="margin-right: 10px;">

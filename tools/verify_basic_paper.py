@@ -10,7 +10,7 @@ import numpy as np
 
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
-from drone_sim.tools.live_view import load_parametrized_json
+from tools.live_view import load_parametrized_json
 
 
 def _load_scenario(path: Path) -> ScenarioConfig:
@@ -69,16 +69,16 @@ def _step_margins(sim: Simulator) -> tuple[float, float, float]:
       p = positions[i]
       r = radii[i]
       # Lower bounds: p - r >= room_min
-      room_margins.extend([(float(p[d] - r - room_min[d])) for d in range(3)])
+      room_margins.extend([float(p[d] - r - room_min[d]) for d in range(3)])
       # Upper bounds: p + r <= room_max
-      room_margins.extend([(float(room_max[d] - (p[d] + r))) for d in range(3)])
+      room_margins.extend([float(room_max[d] - p[d] - r) for d in range(3)])
 
    min_room_margin = min(room_margins) if room_margins else math.inf
 
    return min_pair_margin, max_speed, min_room_margin
 
 
-def verify_paper_configs(base_dir: Path, *, steps: int = 200, ) -> None:
+def verify_paper_configs(base_dir: Path, *, steps: int = 200) -> None:
    """Run all configs/*.json and report constraint margins.
 
    For each config, we simulate `steps` steps (or until the routes are essentially finished
@@ -131,11 +131,11 @@ def main(argv: list[str] | None = None) -> None:
          description=("Verify paper configs by simulating them and reporting constraint margins "
                       "(distance, speed, room)."))
    parser.add_argument("--steps", type=int, default=200,
-         help="Number of Simulator.step() calls per config (default: 200)", )
+                       help="Number of Simulator.step() calls per config (default: 200)")
 
    args = parser.parse_args(argv)
 
-   verify_paper_configs(Path("."), steps=args.steps)
+   verify_paper_configs(Path("../"), steps=args.steps)
 
 
 if __name__ == "__main__":

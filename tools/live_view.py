@@ -37,10 +37,10 @@ def load_parametrized_json(path: str | Path, params: dict[str, str] | None = Non
 
 
 def run_live_view(*, config_path: str | Path, params: dict[str, str] | None = None,
-      base_url: str = "http://127.0.0.1:8000", steps: int = 200, step_n: int = 1, sleep_s: float = 0.05,
-      trace_len: int = 50, width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0,
-      record_dir: str | Path | None = None, gif_path: str | Path | None = None, gif_fps: float = 20.0,
-      timeout_s: float = 10.0, ) -> None:
+                  base_url: str = "http://127.0.0.1:8000", steps: int = 200, step_n: int = 1, sleep_s: float = 0.05,
+                  trace_len: int = 50, width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20.0,
+                  azim: float = -60.0, record_dir: str | Path | None = None, gif_path: str | Path | None = None,
+                  gif_fps: float = 20.0, timeout_s: float = 10.0) -> None:
    """Load scenario config into the REST API and display a live-updating render."""
 
    cfg = load_parametrized_json(config_path, params=params)
@@ -65,7 +65,7 @@ def run_live_view(*, config_path: str | Path, params: dict[str, str] | None = No
    with httpx.Client(timeout=timeout) as client:
       # Be explicit about content-type to avoid servers interpreting the body as text.
       try:
-         r = client.post(f"{base_url}/config", content=json.dumps(cfg), headers={"Content-Type": "application/json"}, )
+         r = client.post(f"{base_url}/config", content=json.dumps(cfg), headers={"Content-Type": "application/json"})
          r.raise_for_status()
       except httpx.TimeoutException as e:
          raise RuntimeError("Unsolvable configuration (server timed out while loading /config). "
@@ -87,8 +87,8 @@ def run_live_view(*, config_path: str | Path, params: dict[str, str] | None = No
 
          try:
             r = client.get(f"{base_url}/render",
-                  params={"width": width, "height": height, "dpi": dpi, "elev": elev, "azim": azim,
-                        "trace_len": trace_len, }, )
+                           params={"width": width, "height": height, "dpi": dpi, "elev": elev, "azim": azim,
+                                   "trace_len": trace_len})
             r.raise_for_status()
          except httpx.TimeoutException as e:
             raise RuntimeError(f"Unsolvable configuration (server timed out during /render at frame {i}).") from e
@@ -123,7 +123,7 @@ def run_live_view(*, config_path: str | Path, params: dict[str, str] | None = No
          raise RuntimeError("No frames captured; cannot write GIF")
       duration_ms = int(round(1000.0 / max(0.1, float(gif_fps))))
       gif_out.parent.mkdir(parents=True, exist_ok=True)
-      frames[0].save(gif_out, save_all=True, append_images=frames[1:], duration=duration_ms, loop=0, optimize=False, )
+      frames[0].save(gif_out, save_all=True, append_images=frames[1:], duration=duration_ms, loop=0, optimize=False)
 
 
 def _parse_kv_params(items: list[str]) -> dict[str, str]:
@@ -139,7 +139,7 @@ def _parse_kv_params(items: list[str]) -> dict[str, str]:
 def main(argv: list[str] | None = None) -> None:
    p = argparse.ArgumentParser(description="Live-view DroneSim by polling /render while stepping the sim")
    p.add_argument("--config", required=True, help="Path to scenario JSON (supports ${var} placeholders)")
-   p.add_argument("--param", action="append", default=[], help="Template parameter KEY=VALUE (may be repeated)", )
+   p.add_argument("--param", action="append", default=[], help="Template parameter KEY=VALUE (may be repeated)")
    p.add_argument("--base-url", default="http://127.0.0.1:8000")
    p.add_argument("--steps", type=int, default=200)
    p.add_argument("--step-n", type=int, default=1)
@@ -156,16 +156,16 @@ def main(argv: list[str] | None = None) -> None:
    p.add_argument("--elev", type=float, default=20.0)
    p.add_argument("--azim", type=float, default=-60.0)
    p.add_argument("--timeout", dest="timeout_s", type=float, default=10.0,
-         help="HTTP timeout seconds (increase for large centralized MPC problems)", )
+                  help="HTTP timeout seconds (increase for large centralized MPC problems)")
 
    args = p.parse_args(argv)
 
    params = _parse_kv_params(args.param)
 
    run_live_view(config_path=args.config, params=params, base_url=args.base_url, steps=args.steps, step_n=args.step_n,
-         sleep_s=args.sleep, trace_len=args.trace_len, width=args.width, height=args.height, dpi=args.dpi,
-         elev=args.elev, azim=args.azim, record_dir=args.record_dir, gif_path=args.gif_path, gif_fps=args.gif_fps,
-         timeout_s=args.timeout_s, )
+                 sleep_s=args.sleep, trace_len=args.trace_len, width=args.width, height=args.height, dpi=args.dpi,
+                 elev=args.elev, azim=args.azim, record_dir=args.record_dir, gif_path=args.gif_path,
+                 gif_fps=args.gif_fps, timeout_s=args.timeout_s)
 
 
 def _die(msg: str, code: int = 1) -> "NoReturn":

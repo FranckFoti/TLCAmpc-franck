@@ -18,21 +18,21 @@ _COLOR_BY_DRONE_INDEX = {1: "#00FFFF",  # cyan / tab:cyan
 # Predefined start/target patterns inspired by the paper configs in `configs/`.
 # Keys are the number of drones; values are lists of (start, target) pairs.
 _PREDEFINED_PATTERNS: dict[int, list[tuple[Sequence[float], Sequence[float]]]] = {
-      2: [([0.964, 0.722, -0.222], [-0.964, -0.722, 0.222]), ([-0.699, 1.147, 1.352], [0.699, -1.147, -1.352]), ],
+      2: [([0.964, 0.722, -0.222], [-0.964, -0.722, 0.222]), ([-0.699, 1.147, 1.352], [0.699, -1.147, -1.352])],
       3: [([0.869, 1.126, -0.532], [-0.869, -1.126, 0.532]), ([-0.078, -1.118, -0.184], [0.078, 1.118, 0.184]),
-          ([-0.732, 1.309, 0.849], [0.732, -1.309, -0.849]), ],
+          ([-0.732, 1.309, 0.849], [0.732, -1.309, -0.849])],
       4: [([-0.146, -1.175, -0.504], [0.146, 1.175, 0.504]), ([0.022, 1.212, -1.095], [-0.022, -1.212, 1.095]),
-          ([0.881, 0.113, 1.299], [-0.881, -0.113, -1.299]), ([-1.148, 0.721, 1.055], [1.148, -0.721, -1.055]), ],
+          ([0.881, 0.113, 1.299], [-0.881, -0.113, -1.299]), ([-1.148, 0.721, 1.055], [1.148, -0.721, -1.055])],
       5: [([1.185, 0.959, 1.115], [-1.185, -0.959, -1.115]), ([0.821, -1.169, 0.316], [-0.821, 1.169, -0.316]),
           ([-0.72, 0.648, -1.072], [0.72, -0.648, 1.072]), ([-1.29, -1.117, 1.367], [1.29, 1.117, -1.367]),
-          ([-1.048, 1.202, 1.256], [1.048, -1.202, -1.256]), ],
+          ([-1.048, 1.202, 1.256], [1.048, -1.202, -1.256])],
       6: [([-0.055, 1.251, 0.891], [0.055, -1.251, -0.891]), ([-0.913, -0.924, 0.445], [0.913, 0.924, -0.445]),
           ([0.965, 0.7, -0.965], [-0.965, -0.7, 0.965]), ([1.282, -0.939, 1.186], [-1.282, 0.939, -1.186]),
-          ([-1.264, 0.598, -1.325], [1.264, -0.598, 1.325]), ([0.492, -1.341, -1.115], [-0.492, 1.341, 1.115]), ],
+          ([-1.264, 0.598, -1.325], [1.264, -0.598, 1.325]), ([0.492, -1.341, -1.115], [-0.492, 1.341, 1.115])],
       7: [([-0.39, -1.417, 0.312], [0.39, 1.417, -0.312]), ([1.07, -0.933, -1.155], [-1.07, 0.933, 1.155]),
           ([-0.464, 1.368, -1.102], [0.464, -1.368, 1.102]), ([-0.618, 1.303, 1.365], [0.618, -1.303, -1.365]),
           ([1.489, 1.112, 0.595], [-1.489, -1.112, -0.595]), ([-1.487, -1.071, -1.36], [1.487, 1.071, 1.36]),
-          ([1.365, -1.0, 1.262], [-1.365, 1.0, -1.262]), ], }
+          ([1.365, -1.0, 1.262], [-1.365, 1.0, -1.262])]}
 
 
 def _build_scenario(num_drones: int, horizon: int) -> ScenarioConfig:
@@ -55,28 +55,20 @@ def _build_scenario(num_drones: int, horizon: int) -> ScenarioConfig:
    coordinator = ControllerSpec(type="mpc_central", params={"horizon": horizon})
 
    drones: list[DroneConfig] = []
-
    pattern = _PREDEFINED_PATTERNS.get(num_drones)
 
-   if pattern is not None:
-      # Use the first `num_drones` pairs from the predefined pattern.
-      for i in range(num_drones):
-         start, target = pattern[i]
-         drones.append(
-               DroneConfig(drone_id=f"drone-{i + 1}", start=list(start), waypoints=[], target=list(target), radius=0.2,
-                           safety_zone=1.0, drone_color="tab:blue"))
-   else:
-      # Fallback: place drones on a circle of radius r_start well inside the room bounds.
-      r_start = 1.5
-      for i in range(num_drones):
+   for i in range(num_drones):
+      if pattern is not None:
+         start, target = list(pattern[i][0]), list(pattern[i][1])
+      else:
+         # Fallback: place drones on a circle of radius 1.5 well inside the room bounds.
          angle = 2.0 * math.pi * float(i) / float(num_drones)
-         x = r_start * math.cos(angle)
-         y = r_start * math.sin(angle)
-         start = [x, y, 0.0]
-         target = [-x, -y, 0.0]
+         x = 1.5 * math.cos(angle)
+         y = 1.5 * math.sin(angle)
+         start, target = [x, y, 0.0], [-x, -y, 0.0]
 
-         drones.append(DroneConfig(drone_id=f"drone-{i + 1}", start=start, waypoints=[], target=target, radius=0.2,
-                                   safety_zone=1.0, drone_color="tab:blue"))
+      drones.append(DroneConfig(drone_id=f"drone-{i + 1}", start=start, waypoints=[], target=target,
+                                radius=0.2, safety_zone=1.0, drone_color="tab:blue"))
 
    obstacles: list[ObstacleConfig] = []
 

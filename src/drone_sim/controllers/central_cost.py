@@ -25,7 +25,7 @@ class CentralCostProvider(Protocol):
       """Return scalar cost for this drone."""
 
 
-def _as_diag(w: list[float] | np.ndarray) -> np.ndarray:
+def as_diagonal(w: list[float] | np.ndarray) -> np.ndarray:
    w = np.asarray(w, dtype=float).reshape(-1)
    return np.diag(w)
 
@@ -54,9 +54,9 @@ class CentralMPCAgent(Controller):
 
    def __post_init__(self) -> None:
       self._phys = LinearKinematicsPhysics(dt=self.dt)
-      self._Qp = _as_diag(self.q_pos)
-      self._Qv = _as_diag(self.q_vel)
-      self._R = _as_diag(self.r_u)
+      self._Qp = as_diagonal(self.q_pos)
+      self._Qv = as_diagonal(self.q_vel)
+      self._R = as_diagonal(self.r_u)
       self._u_min = np.asarray(self.u_min, dtype=float)
       self._u_max = np.asarray(self.u_max, dtype=float)
 

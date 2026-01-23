@@ -83,7 +83,7 @@ class Simulator:
          x0[:3] = start
 
          route = Route(waypoints=[np.asarray(w, dtype=float) for w in drone_cfg.waypoints],
-                       target=np.asarray(drone_cfg.target, dtype=float), )
+                       target=np.asarray(drone_cfg.target, dtype=float))
          drone_color = _normalize_color(drone_cfg.drone_color)
          safety_color = _normalize_color(drone_cfg.safety_color or drone_cfg.drone_color)
          trace_color = _normalize_color(drone_cfg.trace_color or drone_cfg.drone_color)

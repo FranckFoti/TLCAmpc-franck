@@ -7,7 +7,7 @@ from typing import Iterable
 import numpy as np
 
 from drone_sim.simulation.simulator import Simulator
-from drone_sim.tools import _build_scenario
+from tools import _build_scenario
 
 
 @dataclass
@@ -35,7 +35,7 @@ def _all_routes_finished(sim: Simulator, pos_tol: float = 0.2, vel_tol: float = 
 
 
 def run_single_scenario(*, num_drones: int, horizon: int, max_wall_time_s: float = 120.0,
-                        max_steps: int = 10_000, ) -> ScenarioResult:
+                        max_steps: int = 10_000) -> ScenarioResult:
    scenario = _build_scenario(num_drones=num_drones, horizon=horizon)
 
    t0 = time.perf_counter()
@@ -73,7 +73,7 @@ def run_single_scenario(*, num_drones: int, horizon: int, max_wall_time_s: float
 
 
 def run_grid(*, drone_counts: Iterable[int] = range(2, 8), horizons: Iterable[int] = range(1, 16),
-             max_wall_time_s: float = 120.0, ) -> list[ScenarioResult]:
+             max_wall_time_s: float = 120.0) -> list[ScenarioResult]:
    results: list[ScenarioResult] = []
 
    for n in drone_counts:
@@ -82,8 +82,7 @@ def run_grid(*, drone_counts: Iterable[int] = range(2, 8), horizons: Iterable[in
          res = run_single_scenario(num_drones=n, horizon=H, max_wall_time_s=max_wall_time_s)
          results.append(res)
          detail = f" ({res.detail})" if res.detail else ""
-         print(
-            f"N={res.num_drones}, H={res.horizon}: status={res.status}, steps={res.steps}, wall_time={res.wall_time_s:.2f}s{detail}\n")
+         print(f"N={res.num_drones}, H={res.horizon}: status={res.status}, steps={res.steps}, wall_time={res.wall_time_s:.2f}s{detail}\n")
 
    return results
 

@@ -7,7 +7,7 @@ from typing import Any
 
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
-from live_view import load_parametrized_json
+from tools.live_view import load_parametrized_json
 
 
 def run_scenario(config_path: str | Path, *, steps: int = 50) -> None:
@@ -44,10 +44,9 @@ def run_scenario(config_path: str | Path, *, steps: int = 50) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-   parser = argparse.ArgumentParser(description="Run a DroneSim scenario config directly with the Simulator", )
-   parser.add_argument("--config", required=True, help="Path to scenario JSON (supports ${var} placeholders)", )
-   parser.add_argument("--steps", type=int, default=50,
-         help="Number of Simulator.step() calls to perform (default: 50)", )
+   parser = argparse.ArgumentParser(description="Run a DroneSim scenario config directly with the Simulator")
+   parser.add_argument("--config", required=True, help="Path to scenario JSON (supports ${var} placeholders)")
+   parser.add_argument("--steps", type=int, default=50, help="Number of Simulator.step() calls to perform (default: 50)")
 
    args = parser.parse_args(argv)
 

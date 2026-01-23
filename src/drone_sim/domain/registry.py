@@ -10,14 +10,14 @@ class Factory(Protocol[T]):
    def __call__(self, **kwargs: Any) -> T: ...
 
 
-_PHYSICS: dict[str, Factory[Any]] = {}
-_CONTROLLERS: dict[str, Factory[Any]] = {}
-_COORDINATORS: dict[str, Factory[Any]] = {}
+PHYSICS: dict[str, Factory[Any]] = {}
+CONTROLLERS: dict[str, Factory[Any]] = {}
+COORDINATORS: dict[str, Factory[Any]] = {}
 
 
 def register_physics(name: str) -> Callable[[Factory[Any]], Factory[Any]]:
    def _decorator(factory: Factory[Any]) -> Factory[Any]:
-      _PHYSICS[name] = factory
+      PHYSICS[name] = factory
       return factory
 
    return _decorator
@@ -25,7 +25,7 @@ def register_physics(name: str) -> Callable[[Factory[Any]], Factory[Any]]:
 
 def register_controller(name: str) -> Callable[[Factory[Any]], Factory[Any]]:
    def _decorator(factory: Factory[Any]) -> Factory[Any]:
-      _CONTROLLERS[name] = factory
+      CONTROLLERS[name] = factory
       return factory
 
    return _decorator
@@ -33,13 +33,13 @@ def register_controller(name: str) -> Callable[[Factory[Any]], Factory[Any]]:
 
 def register_coordinator(name: str) -> Callable[[Factory[Any]], Factory[Any]]:
    def _decorator(factory: Factory[Any]) -> Factory[Any]:
-      _COORDINATORS[name] = factory
+      COORDINATORS[name] = factory
       return factory
 
    return _decorator
 
 
-def _create_from_registry(spec: dict[str, Any], registry: dict[str, Factory[Any]], kind: str) -> Any:
+def create_from_registry(spec: dict[str, Any], registry: dict[str, Factory[Any]], kind: str) -> Any:
    t = spec.get("type")
    if not t:
       raise ValueError(f"{kind} spec must include 'type'")
@@ -50,12 +50,12 @@ def _create_from_registry(spec: dict[str, Any], registry: dict[str, Factory[Any]
 
 
 def create_physics(spec: dict[str, Any]) -> Any:
-   return _create_from_registry(spec, _PHYSICS, "physics")
+   return create_from_registry(spec, PHYSICS, "physics")
 
 
 def create_controller(spec: dict[str, Any]) -> Any:
-   return _create_from_registry(spec, _CONTROLLERS, "controller")
+   return create_from_registry(spec, CONTROLLERS, "controller")
 
 
 def create_coordinator(spec: dict[str, Any]) -> Any:
-   return _create_from_registry(spec, _COORDINATORS, "coordinator")
+   return create_from_registry(spec, COORDINATORS, "coordinator")

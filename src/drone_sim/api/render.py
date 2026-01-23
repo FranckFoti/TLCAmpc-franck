@@ -16,13 +16,13 @@ def _draw_room_wireframe(ax: object, room_min: np.ndarray, room_max: np.ndarray)
          ((x0, y0, z1), (x1, y0, z1)), ((x1, y0, z1), (x1, y1, z1)), ((x1, y1, z1), (x0, y1, z1)),
          ((x0, y1, z1), (x0, y0, z1)), # vertical edges
          ((x0, y0, z0), (x0, y0, z1)), ((x1, y0, z0), (x1, y0, z1)), ((x1, y1, z0), (x1, y1, z1)),
-         ((x0, y1, z0), (x0, y1, z1)), ]
+         ((x0, y1, z0), (x0, y1, z1))]
 
    for (xa, ya, za), (xb, yb, zb) in edges:
       ax.plot([xa, xb], [ya, yb], [za, zb], color="black", linewidth=1.0, alpha=0.4)
 
 
-def _draw_sphere_wireframe(ax: object, center: np.ndarray, radius: float, *, color: str, alpha: float, lw: float, resolution: int = 18, ) -> None:
+def _draw_sphere_wireframe(ax: object, center: np.ndarray, radius: float, *, color: str, alpha: float, lw: float, resolution: int = 18) -> None:
    """Draw a simple sphere wireframe."""
 
    u = np.linspace(0.0, 2.0 * np.pi, resolution)
@@ -38,7 +38,7 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
                drone_radii: list[float], drone_safety_zones: list[float], drone_colors: list[object],
                safety_colors: list[object], trace_colors: list[object], drone_traces: list[list[np.ndarray]],
                obstacles: list[tuple[np.ndarray, float]], step_count: int, compute_time_s: float, width: int = 900,
-               height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0, ) -> bytes:
+               height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0) -> bytes:
    """Render a 3D scene to PNG bytes.
 
    This is intentionally simple (matplotlib wireframe room + points) to keep the REST API self-contained.
