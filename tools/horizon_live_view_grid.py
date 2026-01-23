@@ -25,15 +25,6 @@ class Status(StrEnum):
    ERROR = "error"
 
 
-def _apply_colors(scenario) -> None:
-   for i, drone in enumerate(scenario.drones):
-      idx = i + 1
-      color = _COLOR_BY_DRONE_INDEX.get(idx)
-      if color is None:
-         continue
-      drone.drone_color = color  # Let safety_color and trace_color default from drone_color inside the simulator.
-
-
 def _all_routes_finished_from_state(state: dict, pos_tol: float = 0.2, vel_tol: float = 0.1) -> bool:
    drones = state.get("drones", [])
    for d in drones:
@@ -307,7 +298,6 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, base_url: st
 
    # Build the same ScenarioConfig as test_horizon_feasibility, then patch colors.
    scenario = _build_scenario(num_drones=num_drones, horizon=horizon)
-   _apply_colors(scenario)
 
    cfg_dict = scenario.model_dump(mode="json")
 
