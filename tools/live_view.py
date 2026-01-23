@@ -9,10 +9,14 @@ from pathlib import Path
 from string import Template
 from typing import Any, NoReturn
 
-import httpx
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from PIL import Image
+
+from drone_sim.api.render import render_png
+from drone_sim.domain.config import ScenarioConfig
+from drone_sim.simulation.simulator import Simulator
+from tools import _build_scenario, _all_drones_reached_destination
 
 
 def load_parametrized_json(path: str | Path, params: dict[str, str] | None = None) -> dict[str, Any]:
@@ -35,22 +39,33 @@ def load_parametrized_json(path: str | Path, params: dict[str, str] | None = Non
       text = Template(text).safe_substitute(params)
    return json.loads(text)
 
+def create_scenario(config_path: str | Path | None, params: dict[str, str] | None) -> ScenarioConfig:
+   if not config_path:
+      # Get N and H from param and load default values
+      num_str = params.get("num_drones")
+      hor_str = params.get("horizon")
+      if num_str is None or hor_str is None:
+         _die("When --config has no path, you must provide both num_drones=<int> and horizon=<int> via --param.")
 
-def run_live_view(*, config_path: str | Path, params: dict[str, str] | None = None,
-                  base_url: str = "http://127.0.0.1:8000", steps: int = 200, step_n: int = 1, sleep_s: float = 0.05,
-                  trace_len: int = 50, width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20.0,
-                  azim: float = -60.0, record_dir: str | Path | None = None, gif_path: str | Path | None = None,
-                  gif_fps: float = 20.0, timeout_s: float = 10.0) -> None:
-   """Load scenario config into the REST API and display a live-updating render."""
+      scenario = _build_scenario(num_drones=int(num_str), horizon=int(hor_str))
+   else:
+      # Load raw JSON (with optional template substitution) and validate as ScenarioConfig.
+      cfg_raw = load_parametrized_json(config_path, params=params)
+      if not isinstance(cfg_raw, str):
+         raise TypeError(f"Config must decode to a JSON object/dict, got {type(cfg_raw).__name__}")
 
-   cfg = load_parametrized_json(config_path, params=params)
+      scenario = ScenarioConfig.model_validate(json.loads(cfg_raw))
 
-   # Guard against accidentally loading a JSON *string* (which would be sent as a JSON string
-   # and trigger FastAPI/Pydantic "Input should be a valid dictionary" 422 errors).
-   if isinstance(cfg, str):
-      cfg = json.loads(cfg)
-   if not isinstance(cfg, dict):
-      raise TypeError(f"Config must decode to a JSON object/dict, got {type(cfg).__name__}")
+   for param in params:
+      print(f"{param}: {params[param]}")
+
+   return scenario
+
+def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | None, steps: int, step_n: int, sleep_s: float, trace_len: int,
+                  width: int, height: int, dpi: int, elev: float, azim: float, record_dir: str | Path | None, gif_path: str | Path | None, gif_fps: float) -> None:
+   scenario = create_scenario(config_path=config_path, params=params)
+
+   sim = Simulator.from_config(scenario)
 
    record_path = Path(record_dir) if record_dir is not None else None
    if record_path is not None:
@@ -60,63 +75,77 @@ def run_live_view(*, config_path: str | Path, params: dict[str, str] | None = No
 
    frames: list[Image.Image] = []
 
-   timeout = httpx.Timeout(timeout_s)
+   plt.ion()
+   fig, ax = plt.subplots()
+   ax.set_axis_off()
 
-   with httpx.Client(timeout=timeout) as client:
-      # Be explicit about content-type to avoid servers interpreting the body as text.
-      try:
-         r = client.post(f"{base_url}/config", content=json.dumps(cfg), headers={"Content-Type": "application/json"})
-         r.raise_for_status()
-      except httpx.TimeoutException as e:
-         raise RuntimeError("Unsolvable configuration (server timed out while loading /config). "
-                            "Try reducing the number of drones, increasing the MPC horizon, or lowering constraints.") from e
+   img_artist = None
 
-      plt.ion()
-      fig, ax = plt.subplots()
-      ax.set_axis_off()
+   all_reached = False
+   for i in range(steps):
+      if all_reached:
+         break
+      # Advance the simulation by ``step_n`` internal steps.
+      if step_n > 0:
+         for _ in range(step_n):
+            sim.step()
+            if sim.infeasible:
+               # Mirror the REST API behaviour: treat an infeasible central MPC
+               # configuration as a hard error so the caller can react.
+               detail = sim.infeasible_reason or "Central MPC reported infeasible controls."
+               raise RuntimeError(f"Unsolvable configuration (central MPC infeasible at frame {i}, step {sim.step_count}). Detail: {detail}")
 
-      img_artist = None
+      # Prepare the same inputs that the /render handler would use.
+      traces = [[] if trace_len == 0 else sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones]
+      safety_zones = [float(d.safety_zone) for d in sim.drones]
 
-      for i in range(steps):
-         if step_n > 0:
-            try:
-               r = client.post(f"{base_url}/step", params={"n": step_n})
-               r.raise_for_status()
-            except httpx.TimeoutException as e:
-               raise RuntimeError(f"Unsolvable configuration (server timed out during /step at frame {i}).") from e
+      png_bytes = render_png(
+            room_min=sim.room_min,
+            room_max=sim.room_max,
+            drone_positions=[d.position() for d in sim.drones],
+            drone_radii=[d.radius for d in sim.drones],
+            drone_safety_zones=safety_zones,
+            drone_colors=[d.color for d in sim.drones],
+            safety_colors=[d.safety_color for d in sim.drones],
+            trace_colors=[d.trace_color for d in sim.drones],
+            drone_traces=traces,
+            obstacles=sim.obstacles,
+            step_count=sim.step_count,
+            compute_time_s=sim.compute_time_s,
+            width=width,
+            height=height,
+            dpi=dpi,
+            elev=elev,
+            azim=azim,
+      )
 
-         try:
-            r = client.get(f"{base_url}/render",
-                           params={"width": width, "height": height, "dpi": dpi, "elev": elev, "azim": azim,
-                                   "trace_len": trace_len})
-            r.raise_for_status()
-         except httpx.TimeoutException as e:
-            raise RuntimeError(f"Unsolvable configuration (server timed out during /render at frame {i}).") from e
+      # For display
+      img = mpimg.imread(io.BytesIO(png_bytes), format="png")
+      if img_artist is None:
+         img_artist = ax.imshow(img)
+      else:
+         img_artist.set_data(img)
 
-         # For display
-         img = mpimg.imread(io.BytesIO(r.content), format="png")
-         if img_artist is None:
-            img_artist = ax.imshow(img)
-         else:
-            img_artist.set_data(img)
+      # For recording
+      if record_path is not None or gif_out is not None:
+         pil_img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+         if record_path is not None:
+            frame_path = record_path / f"frame_{i:05d}.png"
+            frame_path.write_bytes(png_bytes)
+         if gif_out is not None:
+            frames.append(pil_img)
 
-         # For recording
-         if record_path is not None or gif_out is not None:
-            pil_img = Image.open(io.BytesIO(r.content)).convert("RGBA")
-            if record_path is not None:
-               frame_path = record_path / f"frame_{i:05d}.png"
-               frame_path.write_bytes(r.content)
-            if gif_out is not None:
-               frames.append(pil_img)
+      fig.canvas.draw_idle()
+      plt.pause(0.001)
 
-         fig.canvas.draw_idle()
-         plt.pause(0.001)
+      if sleep_s > 0:
+         time.sleep(sleep_s)
 
-         if sleep_s > 0:
-            time.sleep(sleep_s)
+      all_reached = _all_drones_reached_destination(sim.drones)
+      print(f"All drones reached: {all_reached}")
 
-      plt.ioff()
-      plt.show()
+   plt.ioff()
+   plt.show()
 
    if gif_out is not None:
       if not frames:
@@ -137,14 +166,15 @@ def _parse_kv_params(items: list[str]) -> dict[str, str]:
 
 
 def main(argv: list[str] | None = None) -> None:
-   p = argparse.ArgumentParser(description="Live-view DroneSim by polling /render while stepping the sim")
-   p.add_argument("--config", required=True, help="Path to scenario JSON (supports ${var} placeholders)")
+   p = argparse.ArgumentParser(description="Live-view DroneSim by stepping the simulator and rendering in-process")
+   p.add_argument("--config",
+                  help="Either a JSON file path (e.g. configs/2DronesHorizon2.json) or param has to set at least 'num_drones' and 'horizon'")
+
    p.add_argument("--param", action="append", default=[], help="Template parameter KEY=VALUE (may be repeated)")
-   p.add_argument("--base-url", default="http://127.0.0.1:8000")
-   p.add_argument("--steps", type=int, default=200)
+   p.add_argument("--steps", type=int, default=500)
    p.add_argument("--step-n", type=int, default=1)
    p.add_argument("--sleep", type=float, default=0.05)
-   p.add_argument("--trace-len", type=int, default=50)
+   p.add_argument("--trace-len", type=int, default=500)
 
    p.add_argument("--record-dir", default=None, help="If set, write PNG frames into this directory")
    p.add_argument("--gif", dest="gif_path", default=None, help="If set, write an animated GIF to this path")
@@ -155,17 +185,14 @@ def main(argv: list[str] | None = None) -> None:
    p.add_argument("--dpi", type=int, default=120)
    p.add_argument("--elev", type=float, default=20.0)
    p.add_argument("--azim", type=float, default=-60.0)
-   p.add_argument("--timeout", dest="timeout_s", type=float, default=10.0,
-                  help="HTTP timeout seconds (increase for large centralized MPC problems)")
 
    args = p.parse_args(argv)
 
    params = _parse_kv_params(args.param)
+   config_str = args.config
 
-   run_live_view(config_path=args.config, params=params, base_url=args.base_url, steps=args.steps, step_n=args.step_n,
-                 sleep_s=args.sleep, trace_len=args.trace_len, width=args.width, height=args.height, dpi=args.dpi,
-                 elev=args.elev, azim=args.azim, record_dir=args.record_dir, gif_path=args.gif_path,
-                 gif_fps=args.gif_fps, timeout_s=args.timeout_s)
+   run_live_view(config_path=config_str, params=params, steps=args.steps, step_n=args.step_n, sleep_s=args.sleep, trace_len=args.trace_len,
+                 width=args.width, height=args.height, dpi=args.dpi, elev=args.elev, azim=args.azim, record_dir=args.record_dir, gif_path=args.gif_path, gif_fps=args.gif_fps)
 
 
 def _die(msg: str, code: int = 1) -> "NoReturn":

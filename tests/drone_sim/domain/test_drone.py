@@ -8,6 +8,7 @@ Tests for:
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from numpy.testing import assert_array_almost_equal, assert_array_equal
 
 from drone_sim.domain.drone import Drone, Route
@@ -141,6 +142,14 @@ class TestRoute:
       for i in range(10):
          route.advance_if_reached(waypoints[i])
       assert route.idx == 10
+
+   def test_destination_reached(self):
+      """Test destination_reached."""
+      route = Route(waypoints=[np.array([float(i), float(i), float(i)]) for i in range(5)],
+                    target=np.array([5.0, 5.0, 5.0]))
+      assert not route.target_reached(np.array([5.0, 5.0, 5.01]), thresh=1e-3)
+      assert not route.target_reached(np.array([5.0, 5.0, 5.001]), thresh=1e-3)
+
 
 
 class TestDrone:

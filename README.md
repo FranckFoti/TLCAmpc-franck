@@ -109,7 +109,7 @@ curl -s http://127.0.0.1:8000/state
 In a **second terminal** (with the server already running):
 
 ```bash
-python -m drone_sim.tools.live_view \
+python -m tools.live_view \
   --config configs/2DronesHorizon2.json \
   --steps 200 \
   --trace-len 100 \
@@ -141,7 +141,7 @@ For the paper’s evaluation, the key constraints are checked numerically:
 The verification script is:
 
 ```bash
-python -m drone_sim.tools.verify_basic_paper --steps 200
+python -m tools.verify_basic_paper --steps 200
 ```
 
 It iterates over all `configs/*.json` and prints output of the form:

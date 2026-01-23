@@ -4,6 +4,7 @@ import math
 from typing import Sequence
 
 from drone_sim.domain.config import (ControllerSpec, DroneConfig, ObstacleConfig, PhysicsSpec, RoomConfig, ScenarioConfig)
+from drone_sim.domain.drone import Drone
 
 # Colors taken from the paper-style JSON configs in configs/*.json, indexed by drone index (1-based).
 _COLOR_BY_DRONE_INDEX = {1: "#00FFFF",  # cyan / tab:cyan
@@ -34,6 +35,9 @@ _PREDEFINED_PATTERNS: dict[int, list[tuple[Sequence[float], Sequence[float]]]] =
           ([1.489, 1.112, 0.595], [-1.489, -1.112, -0.595]), ([-1.487, -1.071, -1.36], [1.487, 1.071, 1.36]),
           ([1.365, -1.0, 1.262], [-1.365, 1.0, -1.262])]}
 
+def _all_drones_reached_destination(drones: list[Drone]) -> bool:
+   reached = [drone.route.target_reached(position=drone.position(), thresh=0.1) for drone in drones]
+   return all(reached)
 
 def _build_scenario(num_drones: int, horizon: int) -> ScenarioConfig:
    """Construct a ScenarioConfig using paper-style start/target patterns.
@@ -68,7 +72,7 @@ def _build_scenario(num_drones: int, horizon: int) -> ScenarioConfig:
          start, target = [x, y, 0.0], [-x, -y, 0.0]
 
       drones.append(DroneConfig(drone_id=f"drone-{i + 1}", start=start, waypoints=[], target=target,
-                                radius=0.2, safety_zone=1.0, drone_color="tab:blue"))
+                                radius=0.2, safety_zone=1.0, drone_color=_COLOR_BY_DRONE_INDEX[i+1]))
 
    obstacles: list[ObstacleConfig] = []
 

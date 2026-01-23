@@ -27,6 +27,9 @@ class Route:
          if np.linalg.norm(position - self.waypoints[self.idx]) <= self.waypoint_radius:
             self.idx += 1
 
+   def target_reached(self, position: np.ndarray, thresh: float = 1e-3) -> bool:
+      return np.linalg.norm(position - self.target) < thresh
+
 
 @dataclass
 class Drone:
