@@ -65,6 +65,7 @@ class Simulator:
       from drone_sim.controllers import central_cost as _central_cost  # noqa: F401
       from drone_sim.physics import linear_kinematics as _  # noqa: F401
       from drone_sim.simulation import coordinator as _coord  # noqa: F401
+      from drone_sim.simulation import distributed_coordinator as _dmpc  # noqa: F401
 
       physics = create_physics({"type": cfg.physics.type, "params": {"dt": cfg.dt, **cfg.physics.params}})
 
@@ -72,8 +73,12 @@ class Simulator:
 
       coordinator = None
       if cfg.coordinator is not None:
+         coord_params = {"dt": cfg.dt, **cfg.coordinator.params}
+         # Pass comm_radius for distributed coordinators
+         if cfg.comm_radius is not None:
+            coord_params["comm_radius"] = cfg.comm_radius
          coordinator = create_coordinator(
-               {"type": cfg.coordinator.type, "params": {"dt": cfg.dt, **cfg.coordinator.params}})
+               {"type": cfg.coordinator.type, "params": coord_params})
 
       for drone_cfg in cfg.drones:
          spec = drone_cfg.controller or cfg.controller
