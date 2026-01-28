@@ -70,6 +70,11 @@ class ScenarioConfig(BaseModel):
    # Nevertheless, maybe there will also be an completely global coordinated system later, this can be used also.
    coordinator: ControllerSpec | None = None
 
+   # Communication radius for distributed MPC neighbor discovery.
+   # When None, all drones are considered neighbors (backward compatible with centralized mode).
+   # When set to a positive float, only drones within this distance are neighbors.
+   comm_radius: float | None = None
+
    drones: list[DroneConfig]
    obstacles: list[ObstacleConfig] = Field(default_factory=list)
 
