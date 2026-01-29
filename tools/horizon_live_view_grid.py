@@ -13,7 +13,7 @@ from PIL import Image
 from drone_sim.api.render import render_png
 from drone_sim.simulation.simulator import Simulator
 from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
-from tools import _build_scenario, _COLOR_BY_DRONE_INDEX, _all_drones_reached_destination
+from tools import _build_scenario, _COLOR_BY_DRONE_INDEX, _all_drones_reached_destination, CoordinatorType
 
 
 class Status(StrEnum):
@@ -50,7 +50,7 @@ def _pairwise_distances(positions: list[np.ndarray]) -> np.ndarray:
 def _print_results(all_pair_dists: list[float], frames: list[Image.Image], gif_fps: float,
                    gif_path: Path, horizon: int, jerk_3d_value: float, num_drones: int, out_dir: Path,
                    status: Status, step_durations: list[float], step_mean_pair_dists: list[float],
-                   wall_time: float) -> None:
+                   wall_time: float, coordinator_type: CoordinatorType) -> None:
    if frames:
       duration_ms = int(round(1000.0 / max(0.1, float(gif_fps))))
       frames[0].save(gif_path, save_all=True, append_images=frames[1:], duration=duration_ms, loop=0, optimize=False)
@@ -88,13 +88,13 @@ def _print_results(all_pair_dists: list[float], frames: list[Image.Image], gif_f
 
    # Write metrics to CSV (one row per scenario) in the same output directory.
    csv_path = out_dir / "metrics.csv"
-   fieldnames = ["num_drones", "horizon", "status", "frames", "steps", "wall_time_s", "min_step_time_s",
+   fieldnames = ["num_drones", "horizon", "coordinator", "status", "frames", "steps", "wall_time_s", "min_step_time_s",
                  "max_step_time_s", "mean_step_time_s", "min_distance", "max_distance", "mean_distance_all_pairs",
                  "mean_distance_step_mean", "jerk_3d_value"]
-   row = {"num_drones": num_drones, "horizon": horizon, "status": status, "frames": len(frames), "steps": num_steps,
-          "wall_time_s": wall_time, "min_step_time_s": min_step_time, "max_step_time_s": max_step_time,
-          "mean_step_time_s": mean_step_time, "min_distance": min_dist, "max_distance": max_dist,
-          "mean_distance_all_pairs": mean_dist, "mean_distance_step_mean": mean_step_mean_dist,
+   row = {"num_drones": num_drones, "horizon": horizon, "coordinator": coordinator_type, "status": status,
+          "frames": len(frames), "steps": num_steps, "wall_time_s": wall_time, "min_step_time_s": min_step_time,
+          "max_step_time_s": max_step_time, "mean_step_time_s": mean_step_time, "min_distance": min_dist,
+          "max_distance": max_dist, "mean_distance_all_pairs": mean_dist, "mean_distance_step_mean": mean_step_mean_dist,
           "jerk_3d_value": jerk_3d_value}
    # Append with header creation if needed.
    write_header = not csv_path.exists()
@@ -215,7 +215,8 @@ def piecewise_linear_loss_3d(points, penalty=1.0, eps_step=1e-6, angle_threshold
    return loss, fitted, segment_starts
 
 
-def run_single_scenario_live_view(*, num_drones: int, horizon: int, out_dir: Path, max_steps: int = 500,
+def run_single_scenario_live_view(*, num_drones: int, horizon: int, out_dir: Path,
+                                  coordinator_type: CoordinatorType = "mpc_central", max_steps: int = 500,
                                   gif_fps: float = 20.0, width: int = 900, height: int = 700, dpi: int = 120,
                                   elev: float = 20.0, azim: float = -60.0, trace_len: int = 50) -> None:
    """
@@ -229,11 +230,12 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, out_dir: Pat
    """
 
    # Build the same ScenarioConfig as test_horizon_feasibility, then patch colors.
-   scenario = _build_scenario(num_drones=num_drones, horizon=horizon)
+   scenario = _build_scenario(num_drones=num_drones, horizon=horizon, coordinator_type=coordinator_type)
    _apply_colors(scenario)
 
    out_dir.mkdir(parents=True, exist_ok=True)
-   gif_path = out_dir / f"N{num_drones}_H{horizon}.gif"
+   coord_suffix = "dmpc" if coordinator_type == "dmpc_admm" else "central"
+   gif_path = out_dir / f"N{num_drones}_H{horizon}_{coord_suffix}.gif"
 
    status = Status.RUNNING
 
@@ -266,8 +268,7 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, out_dir: Pat
       status = Status.ERROR
       wall_time = time.perf_counter() - t0
       jerk_3d_value = _compute_jerk_3d_value()
-      _print_results(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones,
-                     out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+      _print_results(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time, coordinator_type)
       return
 
    for step_idx in range(max_steps):
@@ -346,8 +347,7 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, out_dir: Pat
 
    wall_time = time.perf_counter() - t0
    jerk_3d_value = _compute_jerk_3d_value()
-   _print_results(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones,
-                  out_dir, status, step_durations, step_mean_pair_dists, wall_time)
+   _print_results(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time, coordinator_type)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -358,19 +358,25 @@ def main(argv: list[str] | None = None) -> None:
    p.add_argument("--max-steps", type=int, default=500, help="Per-scenario maximum number of simulation steps")
    p.add_argument("--gif-fps", type=float, default=20.0, help="FPS for generated GIFs")
    p.add_argument("--trace-len", type=int, default=50, help="Number of trace points to render")
+   p.add_argument("--coordinator", type=str, choices=["mpc_central", "dmpc_admm"], default="mpc_central",
+                  help="Coordinator type: 'mpc_central' (centralized) or 'dmpc_admm' (distributed ADMM)")
 
    args = p.parse_args(argv)
 
    drone_counts = range(2, 8)
    horizons = range(1, 21)
 
+   coord_type: CoordinatorType = args.coordinator
+
    print(f"Running live-view GIF grid for N in {list(drone_counts)}, H in {list(horizons)}")
+   print(f"Coordinator: {coord_type}")
    print(f"Output directory: {args.out_dir}")
 
    for n in drone_counts:
       for H in horizons:
-         print(f"=== Scenario N={n}, H={H} ===")
-         run_single_scenario_live_view(num_drones=n, horizon=H, out_dir=args.out_dir, max_steps=args.max_steps, gif_fps=args.gif_fps, trace_len=args.trace_len)
+         print(f"=== Scenario N={n}, H={H}, coordinator={coord_type} ===")
+         run_single_scenario_live_view(num_drones=n, horizon=H, out_dir=args.out_dir, coordinator_type=coord_type,
+                                       max_steps=args.max_steps, gif_fps=args.gif_fps, trace_len=args.trace_len)
 
 
 if __name__ == "__main__":
