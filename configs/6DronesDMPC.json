@@ -30,8 +30,8 @@
   "drones": [
     {
       "drone_id": "drone-1",
-      "start": [-0.146, -1.175, -0.504],
-      "target": [0.146, 1.175, 0.504],
+      "start": [-0.055, 1.251, 0.891],
+      "target": [0.055, -1.251, -0.891],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -39,8 +39,8 @@
     },
     {
       "drone_id": "drone-2",
-      "start": [0.022, 1.212, -1.095],
-      "target": [-0.022, -1.212, 1.095],
+      "start": [-0.913, -0.924, 0.445],
+      "target": [0.913, 0.924, -0.445],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -48,8 +48,8 @@
     },
     {
       "drone_id": "drone-3",
-      "start": [0.881, 0.113, 1.299],
-      "target": [-0.881, -0.113, -1.299],
+      "start": [0.965, 0.7, -0.965],
+      "target": [-0.965, -0.7, 0.965],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -57,8 +57,26 @@
     },
     {
       "drone_id": "drone-4",
-      "start": [-1.148, 0.721, 1.055],
-      "target": [1.148, -0.721, -1.055],
+      "start": [1.282, -0.939, 1.186],
+      "target": [-1.282, 0.939, -1.186],
+      "radius": 0.2,
+      "safety_zone": 1.0,
+      "cons_stop": 0.0,
+      "drone_color": "#FFD700"
+    },
+    {
+      "drone_id": "drone-5",
+      "start": [-1.264, 0.598, -1.325],
+      "target": [1.264, -0.598, 1.325],
+      "radius": 0.2,
+      "safety_zone": 1.0,
+      "cons_stop": 0.0,
+      "drone_color": "#9400D3"
+    },
+    {
+      "drone_id": "drone-6",
+      "start": [0.492, -1.341, -1.115],
+      "target": [-0.492, 1.341, 1.115],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
