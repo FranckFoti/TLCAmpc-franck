@@ -57,6 +57,16 @@ class CollisionEvent(BaseModel):
    threshold: float
 
 
+class ADMMStats(BaseModel):
+   """ADMM statistics from distributed MPC coordinator."""
+
+   iteration_count: int
+   primal_residual: float
+   dual_residual: float
+   converged: bool
+   neighbor_pairs: list[list[str]] = Field(default_factory=list)
+
+
 class StateResponse(BaseModel):
    t: float
    dt: float
@@ -64,3 +74,4 @@ class StateResponse(BaseModel):
    drones: list[DroneState]
    obstacles: list[ObstacleState]
    collisions: list[CollisionEvent] = []
+   admm_stats: ADMMStats | None = None  # Only present with DMPC coordinator

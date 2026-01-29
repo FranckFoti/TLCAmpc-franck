@@ -48,6 +48,9 @@ class DistributedMPCCoordinator:
     _admm_state: ADMMState = field(init=False)
     _u_prev: dict[str, np.ndarray] = field(default_factory=dict)
     _last_iteration_count: int = field(default=0, init=False)
+    _last_primal_residual: float = field(default=0.0, init=False)
+    _last_dual_residual: float = field(default=0.0, init=False)
+    _last_converged: bool = field(default=True, init=False)
 
     def __post_init__(self) -> None:
         self._neighbor_graph = NeighborGraph(comm_radius=self.comm_radius)
@@ -238,6 +241,12 @@ class DistributedMPCCoordinator:
         # Store iteration count for debugging/testing
         self._last_iteration_count = iteration + 1
 
+        # Record final residuals for debugging/visualization
+        primal_res, dual_res = self._admm_state.compute_residuals(trajectories)
+        self._last_primal_residual = primal_res
+        self._last_dual_residual = dual_res
+        self._last_converged = converged
+
         # Warn if not converged (but don't fail - use best-effort solution)
         if not converged:
             warnings.warn(
@@ -289,3 +298,15 @@ class DistributedMPCCoordinator:
         Useful for testing warm-start effectiveness.
         """
         return self._last_iteration_count
+
+    def get_last_residuals(self) -> tuple[float, float]:
+        """Get (primal_residual, dual_residual) from last solve."""
+        return self._last_primal_residual, self._last_dual_residual
+
+    def get_last_converged(self) -> bool:
+        """Check if last solve converged."""
+        return self._last_converged
+
+    def get_neighbor_pairs(self) -> list[tuple[str, str]]:
+        """Get current neighbor pairs for visualization."""
+        return self._neighbor_graph.get_neighbor_pairs()

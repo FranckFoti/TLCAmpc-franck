@@ -37,7 +37,11 @@ def _draw_sphere_wireframe(ax: object, center: np.ndarray, radius: float, *, col
 def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: list[np.ndarray],
                drone_radii: list[float], drone_safety_zones: list[float], drone_colors: list[object],
                safety_colors: list[object], trace_colors: list[object], drone_traces: list[list[np.ndarray]],
-               obstacles: list[tuple[np.ndarray, float]], step_count: int, compute_time_s: float, width: int = 900,
+               obstacles: list[tuple[np.ndarray, float]], step_count: int, compute_time_s: float,
+               neighbor_links: list[tuple[int, int]] | None = None,
+               admm_iteration_count: int | None = None,
+               admm_converged: bool | None = None,
+               width: int = 900,
                height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0) -> bytes:
    """Render a 3D scene to PNG bytes.
 
@@ -54,6 +58,17 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
    ax = fig.add_subplot(111, projection="3d")
 
    _draw_room_wireframe(ax, room_min, room_max)
+
+   # Draw neighbor communication links
+   if neighbor_links:
+      for i, j in neighbor_links:
+         if i < len(drone_positions) and j < len(drone_positions):
+            p1 = np.asarray(drone_positions[i], dtype=float)
+            p2 = np.asarray(drone_positions[j], dtype=float)
+            ax.plot(
+               [p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+               color="gray", linewidth=0.8, alpha=0.5, linestyle="--"
+            )
 
    # Drones (and safety zones)
    if drone_positions:
@@ -103,7 +118,11 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
       ax.set_box_aspect((float(box[0]), float(box[1]), float(box[2])))
 
    ax.view_init(elev=float(elev), azim=float(azim))
-   ax.set_title(f"t = {int(step_count)} steps | compute = {float(compute_time_s):.2f}s")
+   title = f"t = {int(step_count)} steps | compute = {float(compute_time_s):.2f}s"
+   if admm_iteration_count is not None:
+      status = "Y" if admm_converged else "!"
+      title += f" | ADMM: {admm_iteration_count} iter {status}"
+   ax.set_title(title)
 
    if drone_positions or obstacles:
       ax.legend(loc="upper right")

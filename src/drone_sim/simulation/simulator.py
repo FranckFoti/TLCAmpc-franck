@@ -249,10 +249,36 @@ class Simulator:
          self.compute_time_s += time.perf_counter() - t0
 
    def to_dict(self) -> dict:
-      return {"t": self.t, "dt": self.dt, "room": {"min": self.room_min.tolist(), "max": self.room_max.tolist()},
-            "drones": [{"drone_id": d.drone_id, "x": d.x.tolist(), "route_idx": d.route.idx,
-                        "p_ref": d.route.current_ref().tolist(), "radius": d.radius, "safety_zone": d.safety_zone,
-                        "drone_color": _color_to_json(d.color), "safety_color": _color_to_json(d.safety_color),
-                        "trace_color": _color_to_json(d.trace_color)} for d in self.drones],
-            "obstacles": [{"center": c.tolist(), "radius": r} for c, r in self.obstacles],
-            "collisions": list(self.last_collisions)}
+      result = {
+         "t": self.t,
+         "dt": self.dt,
+         "room": {"min": self.room_min.tolist(), "max": self.room_max.tolist()},
+         "drones": [
+            {
+               "drone_id": d.drone_id,
+               "x": d.x.tolist(),
+               "route_idx": d.route.idx,
+               "p_ref": d.route.current_ref().tolist(),
+               "radius": d.radius,
+               "safety_zone": d.safety_zone,
+               "drone_color": _color_to_json(d.color),
+               "safety_color": _color_to_json(d.safety_color),
+               "trace_color": _color_to_json(d.trace_color),
+            }
+            for d in self.drones
+         ],
+         "obstacles": [{"center": c.tolist(), "radius": r} for c, r in self.obstacles],
+         "collisions": list(self.last_collisions),
+      }
+
+      # Add ADMM stats if using distributed coordinator
+      if hasattr(self.coordinator, "get_last_iteration_count"):
+         result["admm_stats"] = {
+            "iteration_count": self.coordinator.get_last_iteration_count(),
+            "primal_residual": self.coordinator.get_last_residuals()[0],
+            "dual_residual": self.coordinator.get_last_residuals()[1],
+            "converged": self.coordinator.get_last_converged(),
+            "neighbor_pairs": [list(pair) for pair in self.coordinator.get_neighbor_pairs()],
+         }
+
+      return result
