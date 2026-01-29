@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import warnings
 from dataclasses import dataclass, field
 
@@ -41,6 +42,7 @@ class DistributedMPCCoordinator:
     primal_tol: float = 1e-3
     dual_tol: float = 1e-3
     comm_radius: float | None = None  # For NeighborGraph
+    gauss_seidel: bool = True  # Use Gauss-Seidel updates for symmetry breaking
 
     # Internal state (initialized in __post_init__)
     _neighbor_graph: NeighborGraph = field(init=False)
@@ -166,8 +168,23 @@ class DistributedMPCCoordinator:
         iteration = 0
         timestep = 0  # For mailbox timestamps
 
+        # Track controls across iterations for final output
+        controls: dict[str, np.ndarray] = {}
+
         for iteration in range(self.max_admm_iter):
-            # 4a. Broadcast current trajectories via mailbox
+            # Determine drone solving order for this iteration
+            drone_order = list(opt_ids)
+            if self.gauss_seidel:
+                if iteration < 3:
+                    # First few iterations: random shuffle for initial symmetry breaking
+                    random.shuffle(drone_order)
+                else:
+                    # Later iterations: priority-based ordering (most constrained first)
+                    drone_order.sort(
+                        key=lambda d: self._compute_priority(d, trajectories, safety_by_id)
+                    )
+
+            # 4a. Broadcast current trajectories via mailbox (initial state)
             self._mailbox.clear()
             for drone_id in opt_ids:
                 i = idx_by_id[drone_id]
@@ -180,48 +197,100 @@ class DistributedMPCCoordinator:
                 )
 
             # 4b-c. For each drone: receive neighbors, solve local MPC
-            new_trajectories: dict[str, np.ndarray] = {}
-            new_controls: dict[str, np.ndarray] = {}
+            if self.gauss_seidel:
+                # Gauss-Seidel: immediate updates after each drone solves
+                for drone_id in drone_order:
+                    i = idx_by_id[drone_id]
+                    x0 = np.asarray(xs[i], dtype=float).reshape(6)
+                    p_ref = np.asarray(prefs[i], dtype=float).reshape(3)
+                    controller = controllers[i]
+                    solver = local_solvers[drone_id]
 
-            for drone_id in opt_ids:
-                i = idx_by_id[drone_id]
-                x0 = np.asarray(xs[i], dtype=float).reshape(6)
-                p_ref = np.asarray(prefs[i], dtype=float).reshape(3)
-                controller = controllers[i]
-                solver = local_solvers[drone_id]
+                    # Get neighbor trajectories from mailbox (includes any updates)
+                    messages = self._mailbox.receive(drone_id)
+                    neighbor_trajectories: dict[str, tuple[np.ndarray, float]] = {}
+                    for sender_id, msg in messages.items():
+                        neighbor_trajectories[sender_id] = (msg.trajectory, msg.safety_zone)
 
-                # Get neighbor trajectories from mailbox
-                messages = self._mailbox.receive(drone_id)
-                neighbor_trajectories: dict[str, tuple[np.ndarray, float]] = {}
-                for sender_id, msg in messages.items():
-                    neighbor_trajectories[sender_id] = (msg.trajectory, msg.safety_zone)
+                    # Get warm-start from previous iteration
+                    u_prev = None
+                    if drone_id in self._u_prev and iteration == 0:
+                        u_prev = np.concatenate(
+                            [self._u_prev[drone_id][1:], self._u_prev[drone_id][-1:]],
+                            axis=0,
+                        )
 
-                # Get warm-start from previous iteration
-                u_prev = None
-                if drone_id in self._u_prev and iteration == 0:
-                    # Use shifted previous timestep solution for first iteration
-                    u_prev = np.concatenate(
-                        [self._u_prev[drone_id][1:], self._u_prev[drone_id][-1:]],
-                        axis=0,
+                    # Solve local MPC
+                    u_opt, traj_opt, success = solver.solve(
+                        x0=x0,
+                        p_ref=p_ref,
+                        controller=controller,
+                        neighbor_trajectories=neighbor_trajectories,
+                        obstacles=obstacles,
+                        room_min=room_min,
+                        room_max=room_max,
+                        u_prev=u_prev,
                     )
 
-                # Solve local MPC with neighbor trajectories as moving obstacles
-                u_opt, traj_opt, success = solver.solve(
-                    x0=x0,
-                    p_ref=p_ref,
-                    controller=controller,
-                    neighbor_trajectories=neighbor_trajectories,
-                    obstacles=obstacles,
-                    room_min=room_min,
-                    room_max=room_max,
-                    u_prev=u_prev,
-                )
+                    # Immediate update (Gauss-Seidel style)
+                    trajectories[drone_id] = traj_opt
+                    controls[drone_id] = u_opt
 
-                new_trajectories[drone_id] = traj_opt
-                new_controls[drone_id] = u_opt
+                    # Broadcast immediately so next drone sees updated trajectory
+                    self._mailbox.broadcast(
+                        sender_id=drone_id,
+                        trajectory=traj_opt,
+                        safety_zone=float(safety_zones[i]),
+                        timestamp=timestep,
+                        neighbor_graph=self._neighbor_graph,
+                    )
+            else:
+                # Jacobi: all drones use stale data, update all at once
+                new_trajectories: dict[str, np.ndarray] = {}
+                new_controls: dict[str, np.ndarray] = {}
 
-            # Update trajectories for next iteration
-            trajectories = new_trajectories
+                for drone_id in drone_order:
+                    i = idx_by_id[drone_id]
+                    x0 = np.asarray(xs[i], dtype=float).reshape(6)
+                    p_ref = np.asarray(prefs[i], dtype=float).reshape(3)
+                    controller = controllers[i]
+                    solver = local_solvers[drone_id]
+
+                    # Get neighbor trajectories from mailbox
+                    messages = self._mailbox.receive(drone_id)
+                    neighbor_trajectories_jac: dict[str, tuple[np.ndarray, float]] = {}
+                    for sender_id, msg in messages.items():
+                        neighbor_trajectories_jac[sender_id] = (
+                            msg.trajectory,
+                            msg.safety_zone,
+                        )
+
+                    # Get warm-start from previous iteration
+                    u_prev = None
+                    if drone_id in self._u_prev and iteration == 0:
+                        u_prev = np.concatenate(
+                            [self._u_prev[drone_id][1:], self._u_prev[drone_id][-1:]],
+                            axis=0,
+                        )
+
+                    # Solve local MPC
+                    u_opt, traj_opt, success = solver.solve(
+                        x0=x0,
+                        p_ref=p_ref,
+                        controller=controller,
+                        neighbor_trajectories=neighbor_trajectories_jac,
+                        obstacles=obstacles,
+                        room_min=room_min,
+                        room_max=room_max,
+                        u_prev=u_prev,
+                    )
+
+                    new_trajectories[drone_id] = traj_opt
+                    new_controls[drone_id] = u_opt
+
+                # Update all trajectories at once (Jacobi style)
+                trajectories = new_trajectories
+                controls = new_controls
 
             # 4d-e. Update z and lambda for all neighbor pairs
             for pair in neighbor_pairs:
@@ -260,7 +329,7 @@ class DistributedMPCCoordinator:
         # and 6. Store trajectories for warm-start
         result: dict[str, np.ndarray] = {}
         for drone_id in opt_ids:
-            u_seq = new_controls[drone_id]
+            u_seq = controls[drone_id]
             self._u_prev[drone_id] = u_seq
             result[drone_id] = u_seq[0].copy()
 
@@ -310,3 +379,44 @@ class DistributedMPCCoordinator:
     def get_neighbor_pairs(self) -> list[tuple[str, str]]:
         """Get current neighbor pairs for visualization."""
         return self._neighbor_graph.get_neighbor_pairs()
+
+    def _compute_priority(
+        self,
+        drone_id: str,
+        trajectories: dict[str, np.ndarray],
+        safety_by_id: dict[str, float],
+    ) -> float:
+        """Compute priority score - lower = higher priority (solve first).
+
+        Drones with smaller safety margins to neighbors get higher priority.
+        This ensures drones in conflict zones solve first and commit to a
+        direction, forcing others to adapt.
+
+        Args:
+            drone_id: ID of the drone
+            trajectories: Current trajectories for all drones
+            safety_by_id: Safety zones by drone ID
+
+        Returns:
+            Priority score (lower = higher priority = solve first)
+        """
+        neighbors = self._neighbor_graph.get_neighbors(drone_id)
+        if not neighbors:
+            return float("inf")  # No neighbors = lowest priority
+
+        min_margin = float("inf")
+        traj_i = trajectories.get(drone_id)
+        if traj_i is None:
+            return float("inf")
+
+        for neighbor_id in neighbors:
+            traj_j = trajectories.get(neighbor_id)
+            if traj_j is None:
+                continue
+            min_dist = safety_by_id[drone_id] + safety_by_id[neighbor_id]
+            for k in range(traj_i.shape[0]):
+                dist = float(np.linalg.norm(traj_i[k] - traj_j[k]))
+                margin = dist - min_dist
+                min_margin = min(min_margin, margin)
+
+        return min_margin  # Smaller margin = higher priority
