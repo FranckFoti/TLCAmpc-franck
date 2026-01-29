@@ -16,6 +16,7 @@ from PIL import Image
 from drone_sim.api.render import render_png
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
+from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
 from tools import _build_scenario, _all_drones_reached_destination
 
 
@@ -50,11 +51,11 @@ def create_scenario(config_path: str | Path | None, params: dict[str, str] | Non
       scenario = _build_scenario(num_drones=int(num_str), horizon=int(hor_str))
    else:
       # Load raw JSON (with optional template substitution) and validate as ScenarioConfig.
-      cfg_raw = load_parametrized_json(config_path, params=params)
-      if not isinstance(cfg_raw, str):
-         raise TypeError(f"Config must decode to a JSON object/dict, got {type(cfg_raw).__name__}")
+      cfg_json = load_parametrized_json(config_path, params=params)
+      if not isinstance(cfg_json, dict):
+         raise TypeError(f"Config must decode to a JSON object/dict, got {type(cfg_json).__name__}")
 
-      scenario = ScenarioConfig.model_validate(json.loads(cfg_raw))
+      scenario = ScenarioConfig.model_validate(cfg_json)
 
    for param in params:
       print(f"{param}: {params[param]}")
@@ -99,24 +100,18 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
       traces = [[] if trace_len == 0 else sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones]
       safety_zones = [float(d.safety_zone) for d in sim.drones]
 
-      png_bytes = render_png(
-            room_min=sim.room_min,
-            room_max=sim.room_max,
-            drone_positions=[d.position() for d in sim.drones],
-            drone_radii=[d.radius for d in sim.drones],
-            drone_safety_zones=safety_zones,
-            drone_colors=[d.color for d in sim.drones],
-            safety_colors=[d.safety_color for d in sim.drones],
-            trace_colors=[d.trace_color for d in sim.drones],
-            drone_traces=traces,
-            obstacles=sim.obstacles,
-            step_count=sim.step_count,
-            compute_time_s=sim.compute_time_s,
-            width=width,
-            height=height,
-            dpi=dpi,
-            elev=elev,
-            azim=azim,
+      is_distributed = isinstance(sim.coordinator, DistributedMPCCoordinator)
+      neighbor_links = None # sim.coordinator.get_neighbor_pairs() if is_distributed else None
+      admm_iteration_count = sim.coordinator.get_last_iteration_count() if is_distributed else None
+      admm_converged = sim.coordinator.get_last_converged() if is_distributed else None
+
+      png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max,
+            drone_positions=[d.position() for d in sim.drones], drone_radii=[d.radius for d in sim.drones], drone_safety_zones=safety_zones,
+            drone_colors=[d.color for d in sim.drones], safety_colors=[d.safety_color for d in sim.drones], trace_colors=[d.trace_color for d in sim.drones],
+            drone_traces=traces, obstacles=sim.obstacles,
+            step_count=sim.step_count, compute_time_s=sim.compute_time_s,
+            neighbor_links=neighbor_links, admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
+            width=width, height=height, dpi=dpi, elev=elev, azim=azim
       )
 
       # For display
