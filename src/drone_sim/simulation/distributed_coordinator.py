@@ -73,6 +73,7 @@ class DistributedMPCCoordinator:
         radii: list[float],
         safety_zones: list[float],
         cons_stops: list[float],
+        v_maxs: list[float] | None = None,  # Not yet used by distributed solver
         controllers: list[object],
         obstacles: list[tuple[np.ndarray, float]],
         external_predictions: dict[str, np.ndarray] | None = None,

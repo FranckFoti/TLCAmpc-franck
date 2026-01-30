@@ -168,6 +168,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       safety_by_id = {"d1": 1.0, "d2": 1.0}
       radii_by_id = {"d1": 0.2, "d2": 0.2}
       cons_stops_by_id = {"d1": 0.0, "d2": 0.0}
+      v_max_by_id = {"d1": 5.0, "d2": 5.0}
 
       g = sample_coordinator._constraints(
          u_flat,
@@ -176,6 +177,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
          safety_by_id=safety_by_id,
          radii_by_id=radii_by_id,
          cons_stops_by_id=cons_stops_by_id,
+         v_max_by_id=v_max_by_id,
          P_ext={},
          obstacles=[],
          room_min=None,
@@ -198,6 +200,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       safety_by_id = {"d1": 1.0, "d2": 1.0}
       radii_by_id = {"d1": 0.2, "d2": 0.2}
       cons_stops_by_id = {"d1": 0.0, "d2": 0.0}
+      v_max_by_id = {"d1": 5.0, "d2": 5.0}
 
       g = sample_coordinator._constraints(
          u_flat,
@@ -206,6 +209,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
          safety_by_id=safety_by_id,
          radii_by_id=radii_by_id,
          cons_stops_by_id=cons_stops_by_id,
+         v_max_by_id=v_max_by_id,
          P_ext={},
          obstacles=[],
          room_min=None,
@@ -227,6 +231,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       safety_by_id = {"d1": 1.0, "d2": 1.0}
       radii_by_id = {"d1": 0.2, "d2": 0.2}
       cons_stops_by_id = {"d1": 0.0, "d2": 0.0}
+      v_max_by_id = {"d1": 5.0, "d2": 5.0}
 
       g = sample_coordinator._constraints(
          u_flat,
@@ -235,6 +240,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
          safety_by_id=safety_by_id,
          radii_by_id=radii_by_id,
          cons_stops_by_id=cons_stops_by_id,
+         v_max_by_id=v_max_by_id,
          P_ext={},
          obstacles=[],
          room_min=None,
@@ -253,6 +259,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       safety_by_id = {"d1": 1.0}
       radii_by_id = {"d1": 0.2}
       cons_stops_by_id = {"d1": 0.0}
+      v_max_by_id = {"d1": 5.0}
       obstacles = [(np.array([0.5, 0.0, 0.0]), 0.2)]
 
       g = sample_coordinator._constraints(
@@ -262,6 +269,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
          safety_by_id=safety_by_id,
          radii_by_id=radii_by_id,
          cons_stops_by_id=cons_stops_by_id,
+         v_max_by_id=v_max_by_id,
          P_ext={},
          obstacles=obstacles,
          room_min=None,
@@ -280,6 +288,7 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       safety_by_id = {"d1": 1.0}
       radii_by_id = {"d1": 0.2}
       cons_stops_by_id = {"d1": 0.0}
+      v_max_by_id = {"d1": 5.0}
       room_min = np.array([0.0, 0.0, 0.0])
       room_max = np.array([10.0, 10.0, 10.0])
 
@@ -290,12 +299,74 @@ class TestCentralMPCGlobalCoordinatorConstraints:
          safety_by_id=safety_by_id,
          radii_by_id=radii_by_id,
          cons_stops_by_id=cons_stops_by_id,
+         v_max_by_id=v_max_by_id,
          P_ext={},
          obstacles=[],
          room_min=room_min,
          room_max=room_max
       )
 
+      assert np.any(g < 0)
+
+   def test_constraints_velocity_satisfied(self, sample_coordinator: CentralMPCGlobalCoordinator):
+      """Test velocity constraints are satisfied when velocity is below v_max."""
+      M = 1
+      H = sample_coordinator.horizon
+      # Drone with velocity (1, 1, 1) has magnitude sqrt(3) ≈ 1.73 m/s, below v_max=5.0
+      xs0 = np.array([[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]])
+      u_flat = np.zeros(M * H * 3)  # Zero acceleration maintains velocity
+      opt_ids = ["d1"]
+      safety_by_id = {"d1": 1.0}
+      radii_by_id = {"d1": 0.2}
+      cons_stops_by_id = {"d1": 0.0}
+      v_max_by_id = {"d1": 5.0}
+
+      g = sample_coordinator._constraints(
+         u_flat,
+         xs0=xs0,
+         opt_ids=opt_ids,
+         safety_by_id=safety_by_id,
+         radii_by_id=radii_by_id,
+         cons_stops_by_id=cons_stops_by_id,
+         v_max_by_id=v_max_by_id,
+         P_ext={},
+         obstacles=[],
+         room_min=None,
+         room_max=None
+      )
+
+      # All constraints should be satisfied (>= 0)
+      assert np.all(g >= 0)
+
+   def test_constraints_velocity_violated(self, sample_coordinator: CentralMPCGlobalCoordinator):
+      """Test velocity constraints are violated when velocity exceeds v_max."""
+      M = 1
+      H = sample_coordinator.horizon
+      # Drone with velocity (3, 3, 3) has magnitude sqrt(27) ≈ 5.2 m/s
+      # With v_max=2.0, this should violate: 4 - 27 = -23 < 0
+      xs0 = np.array([[0.0, 0.0, 0.0, 3.0, 3.0, 3.0]])
+      u_flat = np.zeros(M * H * 3)
+      opt_ids = ["d1"]
+      safety_by_id = {"d1": 1.0}
+      radii_by_id = {"d1": 0.2}
+      cons_stops_by_id = {"d1": 0.0}
+      v_max_by_id = {"d1": 2.0}  # Low v_max to trigger violation
+
+      g = sample_coordinator._constraints(
+         u_flat,
+         xs0=xs0,
+         opt_ids=opt_ids,
+         safety_by_id=safety_by_id,
+         radii_by_id=radii_by_id,
+         cons_stops_by_id=cons_stops_by_id,
+         v_max_by_id=v_max_by_id,
+         P_ext={},
+         obstacles=[],
+         room_min=None,
+         room_max=None
+      )
+
+      # Some constraints should be violated (< 0) due to velocity exceeding v_max
       assert np.any(g < 0)
 
 

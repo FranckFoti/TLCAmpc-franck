@@ -49,7 +49,7 @@ def _all_drones_reached_destination(drones: list[Drone]) -> bool:
 
 CoordinatorType = Literal["mpc_central", "dmpc_admm"]
 
-def _build_scenario(num_drones: int, horizon: int, coordinator_type: CoordinatorType = "mpc_central") -> ScenarioConfig:
+def _build_scenario(num_drones: int, horizon: int, v_max: float, u_max: float, coordinator_type: CoordinatorType = "mpc_central") -> ScenarioConfig:
    """Construct a ScenarioConfig using paper-style start/target patterns.
 
    For N=2..7 we use fixed patterns that mirror the JSON configs in `configs/`.

@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import StrEnum
 from pathlib import Path
 
@@ -22,6 +24,10 @@ class Status(StrEnum):
    MAX_STEPS = "max_steps"
    INFEASIBLE = "infeasible"
    ERROR = "error"
+
+
+# Lock for thread-safe CSV writing
+_csv_lock = threading.Lock()
 
 
 def _apply_colors(scenario) -> None:
@@ -87,6 +93,7 @@ def _print_results(all_pair_dists: list[float], frames: list[Image.Image], gif_f
          f"min_step={min_step_time:.4f}s, max_step={max_step_time:.4f}s, mean_step={mean_step_time:.4f}s")
 
    # Write metrics to CSV (one row per scenario) in the same output directory.
+   # Use lock for thread-safe writing.
    csv_path = out_dir / "metrics.csv"
    fieldnames = ["num_drones", "horizon", "coordinator", "status", "frames", "steps", "wall_time_s", "min_step_time_s",
                  "max_step_time_s", "mean_step_time_s", "min_distance", "max_distance", "mean_distance_all_pairs",
@@ -96,13 +103,13 @@ def _print_results(all_pair_dists: list[float], frames: list[Image.Image], gif_f
           "max_step_time_s": max_step_time, "mean_step_time_s": mean_step_time, "min_distance": min_dist,
           "max_distance": max_dist, "mean_distance_all_pairs": mean_dist, "mean_distance_step_mean": mean_step_mean_dist,
           "jerk_3d_value": jerk_3d_value}
-   # Append with header creation if needed.
-   write_header = not csv_path.exists()
-   with csv_path.open("a", newline="", encoding="utf-8") as f:
-      writer = csv.DictWriter(f, fieldnames=fieldnames)
-      if write_header:
-         writer.writeheader()
-      writer.writerow(row)
+   with _csv_lock:
+      write_header = not csv_path.exists()
+      with csv_path.open("a", newline="", encoding="utf-8") as f:
+         writer = csv.DictWriter(f, fieldnames=fieldnames)
+         if write_header:
+            writer.writeheader()
+         writer.writerow(row)
 
 
 def piecewise_linear_loss_3d(points, penalty=1.0, eps_step=1e-6, angle_threshold_deg=90.0):
@@ -350,6 +357,18 @@ def run_single_scenario_live_view(*, num_drones: int, horizon: int, out_dir: Pat
    _print_results(all_pair_dists, frames, gif_fps, gif_path, horizon, jerk_3d_value, num_drones, out_dir, status, step_durations, step_mean_pair_dists, wall_time, coordinator_type)
 
 
+def _run_scenario_wrapper(num_drones: int, horizon: int, out_dir: Path, coordinator_type: CoordinatorType,
+                          max_steps: int, gif_fps: float, trace_len: int) -> tuple[int, int, str]:
+   """Wrapper for thread pool execution. Returns (num_drones, horizon, status) for progress tracking."""
+   try:
+      run_single_scenario_live_view(num_drones=num_drones, horizon=horizon, out_dir=out_dir,
+                                    coordinator_type=coordinator_type, max_steps=max_steps,
+                                    gif_fps=gif_fps, trace_len=trace_len)
+      return (num_drones, horizon, "ok")
+   except Exception as e:
+      return (num_drones, horizon, f"exception: {e}")
+
+
 def main(argv: list[str] | None = None) -> None:
    p = argparse.ArgumentParser(
       description="Run the predefined horizon-feasibility scenarios and create live-view GIFs for N=2..7, H=1..20.")
@@ -360,23 +379,55 @@ def main(argv: list[str] | None = None) -> None:
    p.add_argument("--trace-len", type=int, default=50, help="Number of trace points to render")
    p.add_argument("--coordinator", type=str, choices=["mpc_central", "dmpc_admm"], default="mpc_central",
                   help="Coordinator type: 'mpc_central' (centralized) or 'dmpc_admm' (distributed ADMM)")
+   p.add_argument("--threads", type=int, default=1,
+                  help="Number of parallel threads for running simulations (default: 1, sequential)")
 
    args = p.parse_args(argv)
 
-   drone_counts = range(2, 8)
-   horizons = range(1, 21)
+   drone_counts = list(range(2, 8))
+   horizons = list(range(1, 21))
 
    coord_type: CoordinatorType = args.coordinator
+   num_threads = max(1, args.threads)
 
-   print(f"Running live-view GIF grid for N in {list(drone_counts)}, H in {list(horizons)}")
+   # Build list of all (N, H) scenarios to run
+   scenarios = [(n, H) for n in drone_counts for H in horizons]
+   total_scenarios = len(scenarios)
+
+   print(f"Running live-view GIF grid for N in {drone_counts}, H in {horizons}")
    print(f"Coordinator: {coord_type}")
    print(f"Output directory: {args.out_dir}")
+   print(f"Threads: {num_threads}")
+   print(f"Total scenarios: {total_scenarios}")
 
-   for n in drone_counts:
-      for H in horizons:
-         print(f"=== Scenario N={n}, H={H}, coordinator={coord_type} ===")
+   if num_threads == 1:
+      # Sequential execution (original behavior)
+      for idx, (n, H) in enumerate(scenarios, 1):
+         print(f"=== [{idx}/{total_scenarios}] Scenario N={n}, H={H}, coordinator={coord_type} ===")
          run_single_scenario_live_view(num_drones=n, horizon=H, out_dir=args.out_dir, coordinator_type=coord_type,
                                        max_steps=args.max_steps, gif_fps=args.gif_fps, trace_len=args.trace_len)
+   else:
+      # Parallel execution with thread pool
+      print(f"Starting parallel execution with {num_threads} threads...")
+      completed = 0
+
+      with ThreadPoolExecutor(max_workers=num_threads) as executor:
+         futures = {
+            executor.submit(_run_scenario_wrapper, n, H, args.out_dir, coord_type,
+                            args.max_steps, args.gif_fps, args.trace_len): (n, H)
+            for n, H in scenarios
+         }
+
+         for future in as_completed(futures):
+            n, H = futures[future]
+            completed += 1
+            try:
+               result_n, result_H, status = future.result()
+               print(f"[{completed}/{total_scenarios}] Completed N={result_n}, H={result_H}: {status}")
+            except Exception as e:
+               print(f"[{completed}/{total_scenarios}] Failed N={n}, H={H}: {e}")
+
+      print(f"All {total_scenarios} scenarios completed.")
 
 
 if __name__ == "__main__":

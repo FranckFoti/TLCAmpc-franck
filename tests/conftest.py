@@ -130,6 +130,7 @@ def sample_drone(sample_controller: CentralMPCAgent, sample_route: Route) -> Dro
       radius=0.2,
       safety_zone=1.0,
       cons_stop=0.0,
+      v_max=5.0,
       color="tab:blue",
       safety_color="tab:cyan",
       trace_color="tab:blue",
