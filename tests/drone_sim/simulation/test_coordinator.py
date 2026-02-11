@@ -69,11 +69,6 @@ class TestCentralMPCGlobalCoordinatorInit:
       assert coord.max_iter == 200
       assert coord.f_tol == 1e-4
 
-   def test_init_creates_physics_model(self, sample_coordinator: CentralMPCGlobalCoordinator):
-      """Test __post_init__ creates internal physics model."""
-      assert hasattr(sample_coordinator, "_phys")
-      assert sample_coordinator._phys.dt == sample_coordinator.dt
-
 
 class TestCentralMPCGlobalCoordinatorPredictStates:
    """Tests for CentralMPCGlobalCoordinator._predict_states method."""
@@ -82,10 +77,11 @@ class TestCentralMPCGlobalCoordinatorPredictStates:
       """Test _predict_states returns correct shape."""
       M = 2  # Number of drones
       H = sample_coordinator.horizon
-      xs0 = np.zeros((M, 6))
+      d1 = _make_drone("d1", np.zeros(6), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      d2 = _make_drone("d2", np.zeros(6), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u = np.zeros((M, H, 3))
 
-      X = sample_coordinator._predict_states(xs0, u)
+      X = sample_coordinator._predict_states([d1, d2], u)
 
       assert X.shape == (M, H, 6)
 
@@ -93,10 +89,11 @@ class TestCentralMPCGlobalCoordinatorPredictStates:
       """Test _predict_states with zero control maintains velocity trajectory."""
       M = 1
       H = sample_coordinator.horizon
-      xs0 = np.array([[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]])  # Moving in x
+      # Moving in x
+      d1 = _make_drone("d1", np.array([[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u = np.zeros((M, H, 3))
 
-      X = sample_coordinator._predict_states(xs0, u)
+      X = sample_coordinator._predict_states([d1], u)
 
       # Position should increase linearly with velocity
       dt = sample_coordinator.dt
@@ -108,10 +105,10 @@ class TestCentralMPCGlobalCoordinatorPredictStates:
       """Test _predict_states with constant acceleration."""
       M = 1
       H = sample_coordinator.horizon
-      xs0 = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])  # At rest
+      d1 = _make_drone("d1", np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u = np.ones((M, H, 3)) * 1.0  # Constant acceleration
 
-      X = sample_coordinator._predict_states(xs0, u)
+      X = sample_coordinator._predict_states([d1], u)
 
       # Velocity should increase with each step
       assert X[0, -1, 3] > 0  # Final x velocity positive
@@ -120,19 +117,17 @@ class TestCentralMPCGlobalCoordinatorPredictStates:
       """Test _predict_states with multiple drones."""
       M = 3
       H = sample_coordinator.horizon
-      xs0 = np.array([
-         [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-         [5.0, 0.0, 0.0, -1.0, 0.0, 0.0],
-         [2.5, 5.0, 0.0, 0.0, -1.0, 0.0]
-      ])
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      d2 = _make_drone("d2", np.array([5.0, 0.0, 0.0, -1.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      d3 = _make_drone("d2", np.array([2.5, 5.0, 0.0, 0.0, -1.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u = np.zeros((M, H, 3))
 
-      X = sample_coordinator._predict_states(xs0, u)
+      X = sample_coordinator._predict_states([d1, d2, d3], u)
 
       assert X.shape == (M, H, 6)
-      assert X[0, -1, 0] > xs0[0, 0]
-      assert X[1, -1, 0] < xs0[1, 0]
-      assert X[2, -1, 1] < xs0[2, 1]
+      assert X[0, -1, 0] > d1.x[0]
+      assert X[1, -1, 0] < d2.x[0]
+      assert X[2, -1, 1] < d3.x[1]
 
 
 class TestCentralMPCGlobalCoordinatorConstraints:
@@ -142,29 +137,16 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       """Test _constraints returns numpy array."""
       M = 2
       H = sample_coordinator.horizon
-      xs0 = np.array([
-         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-         [10.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      ])
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      d2 = _make_drone("d2", np.array([10.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u_flat = np.zeros(M * H * 3)
-      opt_ids = ["d1", "d2"]
-      safety_by_id = {"d1": 1.0, "d2": 1.0}
-      radii_by_id = {"d1": 0.2, "d2": 0.2}
-      cons_stops_by_id = {"d1": 0.0, "d2": 0.0}
-      v_max_by_id = {"d1": 5.0, "d2": 5.0}
 
       g = sample_coordinator._constraints(
          u_flat,
-         xs0=xs0,
-         opt_ids=opt_ids,
-         safety_by_id=safety_by_id,
-         radii_by_id=radii_by_id,
-         cons_stops_by_id=cons_stops_by_id,
-         v_max_by_id=v_max_by_id,
-
+         drones=[d1, d2],
          obstacles=[],
          room_min=None,
-         room_max=None
+         room_max=None,
       )
 
       assert isinstance(g, np.ndarray)
@@ -174,29 +156,16 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       """Test constraints are satisfied (>=0) when drones are far apart."""
       M = 2
       H = sample_coordinator.horizon
-      xs0 = np.array([
-         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-         [100.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      ])
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      d2 = _make_drone("d2", np.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u_flat = np.zeros(M * H * 3)
-      opt_ids = ["d1", "d2"]
-      safety_by_id = {"d1": 1.0, "d2": 1.0}
-      radii_by_id = {"d1": 0.2, "d2": 0.2}
-      cons_stops_by_id = {"d1": 0.0, "d2": 0.0}
-      v_max_by_id = {"d1": 5.0, "d2": 5.0}
 
       g = sample_coordinator._constraints(
          u_flat,
-         xs0=xs0,
-         opt_ids=opt_ids,
-         safety_by_id=safety_by_id,
-         radii_by_id=radii_by_id,
-         cons_stops_by_id=cons_stops_by_id,
-         v_max_by_id=v_max_by_id,
-
+         drones=[d1, d2],
          obstacles=[],
          room_min=None,
-         room_max=None
+         room_max=None,
       )
 
       assert np.all(g >= 0)
@@ -205,29 +174,16 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       """Test constraints are violated (<0) when drones overlap."""
       M = 2
       H = sample_coordinator.horizon
-      xs0 = np.array([
-         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-         [0.5, 0.0, 0.0, 0.0, 0.0, 0.0]
-      ])
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      d2 = _make_drone("d2", np.array([0.5, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u_flat = np.zeros(M * H * 3)
-      opt_ids = ["d1", "d2"]
-      safety_by_id = {"d1": 1.0, "d2": 1.0}
-      radii_by_id = {"d1": 0.2, "d2": 0.2}
-      cons_stops_by_id = {"d1": 0.0, "d2": 0.0}
-      v_max_by_id = {"d1": 5.0, "d2": 5.0}
 
       g = sample_coordinator._constraints(
          u_flat,
-         xs0=xs0,
-         opt_ids=opt_ids,
-         safety_by_id=safety_by_id,
-         radii_by_id=radii_by_id,
-         cons_stops_by_id=cons_stops_by_id,
-         v_max_by_id=v_max_by_id,
-
+         drones=[d1, d2],
          obstacles=[],
          room_min=None,
-         room_max=None
+         room_max=None,
       )
 
       assert np.any(g < 0)
@@ -236,27 +192,16 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       """Test constraints account for obstacles."""
       M = 1
       H = sample_coordinator.horizon
-      xs0 = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u_flat = np.zeros(M * H * 3)
-      opt_ids = ["d1"]
-      safety_by_id = {"d1": 1.0}
-      radii_by_id = {"d1": 0.2}
-      cons_stops_by_id = {"d1": 0.0}
-      v_max_by_id = {"d1": 5.0}
       obstacles = [(np.array([0.5, 0.0, 0.0]), 0.2)]
 
       g = sample_coordinator._constraints(
          u_flat,
-         xs0=xs0,
-         opt_ids=opt_ids,
-         safety_by_id=safety_by_id,
-         radii_by_id=radii_by_id,
-         cons_stops_by_id=cons_stops_by_id,
-         v_max_by_id=v_max_by_id,
-
+         drones=[d1],
          obstacles=obstacles,
          room_min=None,
-         room_max=None
+         room_max=None,
       )
 
       assert np.any(g < 0)
@@ -265,28 +210,17 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       """Test constraints account for room bounds."""
       M = 1
       H = sample_coordinator.horizon
-      xs0 = np.array([[-10.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
+      d1 = _make_drone("d1", np.array([-10.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u_flat = np.zeros(M * H * 3)
-      opt_ids = ["d1"]
-      safety_by_id = {"d1": 1.0}
-      radii_by_id = {"d1": 0.2}
-      cons_stops_by_id = {"d1": 0.0}
-      v_max_by_id = {"d1": 5.0}
       room_min = np.array([0.0, 0.0, 0.0])
       room_max = np.array([10.0, 10.0, 10.0])
 
       g = sample_coordinator._constraints(
          u_flat,
-         xs0=xs0,
-         opt_ids=opt_ids,
-         safety_by_id=safety_by_id,
-         radii_by_id=radii_by_id,
-         cons_stops_by_id=cons_stops_by_id,
-         v_max_by_id=v_max_by_id,
-
+         drones=[d1],
          obstacles=[],
          room_min=room_min,
-         room_max=room_max
+         room_max=room_max,
       )
 
       assert np.any(g < 0)
@@ -296,61 +230,40 @@ class TestCentralMPCGlobalCoordinatorConstraints:
       M = 1
       H = sample_coordinator.horizon
       # Drone with velocity (1, 1, 1) has magnitude sqrt(3) ≈ 1.73 m/s, below v_max=5.0
-      xs0 = np.array([[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]])
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
       u_flat = np.zeros(M * H * 3)  # Zero acceleration maintains velocity
-      opt_ids = ["d1"]
-      safety_by_id = {"d1": 1.0}
-      radii_by_id = {"d1": 0.2}
-      cons_stops_by_id = {"d1": 0.0}
-      v_max_by_id = {"d1": 5.0}
 
       g = sample_coordinator._constraints(
          u_flat,
-         xs0=xs0,
-         opt_ids=opt_ids,
-         safety_by_id=safety_by_id,
-         radii_by_id=radii_by_id,
-         cons_stops_by_id=cons_stops_by_id,
-         v_max_by_id=v_max_by_id,
-
+         drones=[d1],
          obstacles=[],
          room_min=None,
-         room_max=None
+         room_max=None,
       )
 
       # All constraints should be satisfied (>= 0)
       assert np.all(g >= 0)
 
-   def test_constraints_velocity_violated(self, sample_coordinator: CentralMPCGlobalCoordinator):
-      """Test velocity constraints are violated when velocity exceeds v_max."""
+   def test_constraints_velocity_clipped_by_physics(self, sample_coordinator: CentralMPCGlobalCoordinator):
+      """Test velocity constraints are satisfied even with high initial velocity (physics clips it)."""
       M = 1
       H = sample_coordinator.horizon
       # Drone with velocity (3, 3, 3) has magnitude sqrt(27) ≈ 5.2 m/s
-      # With v_max=2.0, this should violate: 4 - 27 = -23 < 0
-      xs0 = np.array([[0.0, 0.0, 0.0, 3.0, 3.0, 3.0]])
+      # With v_max=2.0, physics.step() clips velocity to 2.0, so constraint stays satisfied.
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 3.0, 3.0, 3.0]), np.zeros(3),
+                        CentralMPCAgent(dt=sample_coordinator.dt), v_max=2.0)
       u_flat = np.zeros(M * H * 3)
-      opt_ids = ["d1"]
-      safety_by_id = {"d1": 1.0}
-      radii_by_id = {"d1": 0.2}
-      cons_stops_by_id = {"d1": 0.0}
-      v_max_by_id = {"d1": 2.0}  # Low v_max to trigger violation
 
       g = sample_coordinator._constraints(
          u_flat,
-         xs0=xs0,
-         opt_ids=opt_ids,
-         safety_by_id=safety_by_id,
-         radii_by_id=radii_by_id,
-         cons_stops_by_id=cons_stops_by_id,
-         v_max_by_id=v_max_by_id,
-
+         drones=[d1],
          obstacles=[],
          room_min=None,
-         room_max=None
+         room_max=None,
       )
 
-      # Some constraints should be violated (< 0) due to velocity exceeding v_max
-      assert np.any(g < 0)
+      # All constraints should be satisfied because physics.step() clips velocity
+      assert np.all(g >= -1e-9)
 
 
 class TestCentralMPCGlobalCoordinatorSolveControls:
@@ -417,15 +330,13 @@ class TestCentralMPCGlobalCoordinatorObservers:
 
    def test_observe_obstacles_adds_constraints(self, sample_coordinator: CentralMPCGlobalCoordinator):
       """Test observe_obstacles adds constraint values."""
-      M = 1
       H = sample_coordinator.horizon
-      P_opt = np.zeros((M, H, 3))  # Drone at origin
+      d1 = _make_drone("d1", np.zeros(6), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      P_opt = np.zeros((1, H, 3))  # Drone at origin
       obstacles = [(np.array([5.0, 0.0, 0.0]), 0.5)]
-      opt_ids = ["d1"]
-      safety_by_id = {"d1": 1.0}
       vals: list[float] = []
 
-      sample_coordinator.observe_obstacles(M, P_opt, obstacles, opt_ids, safety_by_id, vals)
+      sample_coordinator.observe_obstacles([d1], P_opt, obstacles, vals)
 
       # Should have H constraints (one per timestep)
       assert len(vals) == H
@@ -434,19 +345,17 @@ class TestCentralMPCGlobalCoordinatorObservers:
 
    def test_observe_no_flying_zone_adds_constraints(self, sample_coordinator: CentralMPCGlobalCoordinator):
       """Test observe_no_flying_zone adds room boundary constraints."""
-      M = 1
       H = sample_coordinator.horizon
-      P_opt = np.zeros((M, H, 3)) + 5.0  # Drone at (5,5,5)
-      opt_ids = ["d1"]
-      safety_by_id = {"d1": 1.0}
+      d1 = _make_drone("d1", np.zeros(6), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
+      P_opt = np.zeros((1, H, 3)) + 5.0  # Drone at (5,5,5)
       room_min = np.array([0.0, 0.0, 0.0])
       room_max = np.array([10.0, 10.0, 10.0])
       vals: list[float] = []
 
-      sample_coordinator.observe_no_flying_zone(M, P_opt, opt_ids, safety_by_id, room_max, room_min, vals)
+      sample_coordinator.observe_no_flying_zone([d1], P_opt, room_max, room_min, vals)
 
-      # Should have H * M * 6 constraints (6 walls per drone per timestep)
-      assert len(vals) == H * M * 6
+      # Should have H * 1 * 6 constraints (6 walls per drone per timestep)
+      assert len(vals) == H * 6
       # Drone is well within room, so constraints should be satisfied
       assert all(v >= 0 for v in vals)
 
