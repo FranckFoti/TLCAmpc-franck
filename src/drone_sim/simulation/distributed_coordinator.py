@@ -63,14 +63,11 @@ class DistributedMPCCoordinator:
       """Solve for drone controls using distributed ADMM optimization.
       Matches the CentralMPCGlobalCoordinator interface.
 
-      Args:
-          drones: List of Drone objects to optimize
-          obstacles: List of (center, radius) static obstacles
-          room_min: Room lower bounds (3,) or None
-          room_max: Room upper bounds (3,) or None
-
-      Returns:
-          Dict mapping drone_id to control (3,) for first timestep
+      :param drones: List of Drone objects to optimize
+      :param obstacles: List of (center, radius) static obstacles
+      :param room_min: Room lower bounds (3,) or None
+      :param room_max: Room upper bounds (3,) or None
+      :return: Dict mapping drone_id to control (3,) for first timestep
       """
       # Extract values from Drone objects
       drone_ids = [d.drone_id for d in drones]
@@ -299,13 +296,10 @@ class DistributedMPCCoordinator:
       This ensures drones in conflict zones solve first and commit to a
       direction, forcing others to adapt.
 
-      Args:
-          drone_id: ID of the drone
-          trajectories: Current trajectories for all drones
-          safety_by_id: Safety zones by drone ID
-
-      Returns:
-          Priority score (lower = higher priority = solve first)
+      :param drone_id: ID of the drone
+      :param trajectories: Current trajectories for all drones
+      :param safety_by_id: Safety zones by drone ID
+      :return: Priority score (lower = higher priority = solve first)
       """
       neighbors = self._neighbor_graph.get_neighbors(drone_id)
       if not neighbors:

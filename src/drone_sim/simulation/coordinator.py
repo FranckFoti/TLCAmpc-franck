@@ -3,16 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from pydantic.v1.typing import new_type_supertype
 
-from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints, VelocityConstraints, )
+from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints, VelocityConstraints)
 from drone_sim.domain.drone import Drone
 from drone_sim.domain.registry import register_coordinator
-from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 
 
 def _has_central_cost(ctrl: object) -> bool:
-   return all(hasattr(ctrl, name) for name in ("central_cost", "central_initial_guess", "horizon",))
+   return all(hasattr(ctrl, name) for name in ("central_cost", "central_initial_guess", "horizon"))
 
 
 @register_coordinator("mpc_central")
@@ -44,8 +42,8 @@ class CentralMPCGlobalCoordinator:
    def _pack(self, u: np.ndarray) -> np.ndarray:
       return np.asarray(u, dtype=float).reshape(-1)
 
-   def _unpack(self, u_flat: np.ndarray, m: int) -> np.ndarray:
-      return np.asarray(u_flat, dtype=float).reshape((m, self.horizon, 3))
+   def _unpack(self, u_flat: np.ndarray, num_drones: int) -> np.ndarray:
+      return np.asarray(u_flat, dtype=float).reshape((num_drones, self.horizon, 3))
 
    def _predict_states(self, drones: list[Drone], u: np.ndarray) -> np.ndarray:
       new_states = np.zeros((len(drones), self.horizon, 6), dtype=float)
@@ -57,8 +55,8 @@ class CentralMPCGlobalCoordinator:
       return new_states
 
    def _predict_positions(self, drones: list[Drone], u: np.ndarray) -> np.ndarray:
-      X = self._predict_states(drones, u)
-      return X[:, :, :3]
+      predicted_states = self._predict_states(drones, u)
+      return predicted_states[:, :, :3]
 
    def _apply_symmetry_break(self, u0: np.ndarray) -> np.ndarray:
       """Apply a tiny deterministic perturbation to break perfect symmetry.
@@ -72,8 +70,8 @@ class CentralMPCGlobalCoordinator:
       if eps <= 0.0:
          return u0
 
-      M = u0.shape[0]
-      if M < 2:
+      num_drones = u0.shape[0]
+      if num_drones < 2:
          return u0
 
       u = np.asarray(u0, dtype=float).copy()
@@ -85,7 +83,7 @@ class CentralMPCGlobalCoordinator:
       base_vec = np.random.uniform(0.1, 1.0, size=3)
       base_vec /= np.linalg.norm(base_vec)  # unit-ish direction
 
-      for i in range(M):
+      for i in range(num_drones):
          sign = 1.0 if (i % 2) == 0 else -1.0
          delta = sign * eps * base_vec  # shape (3,)
          # Broadcast over the horizon: same tiny bias on each step.
@@ -94,7 +92,7 @@ class CentralMPCGlobalCoordinator:
       return u
 
    def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None = None,
-         room_max: np.ndarray | None = None, ) -> dict[str, np.ndarray]:
+         room_max: np.ndarray | None = None) -> dict[str, np.ndarray]:
 
       from scipy.optimize import minimize
 
@@ -110,7 +108,7 @@ class CentralMPCGlobalCoordinator:
          return {}
 
       opt_ids = [drone_ids[i] for i in idx_opt]
-      M = len(idx_opt)
+      num_optimized = len(idx_opt)
 
       # Per-optimized-drone bounds (from physics via Drone)
       bounds_list = [drones[i].bounds() for i in idx_opt]
@@ -121,7 +119,7 @@ class CentralMPCGlobalCoordinator:
          return np.clip(u, u_mins[:, None, :], u_maxs[:, None, :])
 
       # Warm-start: shift previous solution if available
-      u0 = np.zeros((M, self.horizon, 3), dtype=float)
+      u0 = np.zeros((num_optimized, self.horizon, 3), dtype=float)
       have_prev = all(did in self._u_prev for did in opt_ids)
       if have_prev:
          prev = np.stack([self._u_prev[did] for did in opt_ids], axis=0)
@@ -158,10 +156,10 @@ class CentralMPCGlobalCoordinator:
             u0 = np.zeros_like(u0)
 
       bounds = []
-      for j in range(M):
+      for j in range(num_optimized):
          for _k in range(self.horizon):
-            for d in range(3):
-               bounds.append((float(u_mins[j, d]), float(u_maxs[j, d])))
+            for axis in range(3):
+               bounds.append((float(u_mins[j, axis]), float(u_maxs[j, axis])))
 
       cons = {"type": "ineq", "fun": lambda u_flat: self._constraints(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)}
 
@@ -186,7 +184,7 @@ class CentralMPCGlobalCoordinator:
       if min_margin < -1e-6:
          raise RuntimeError(f"CentralMPCGlobalCoordinator produced infeasible controls: min constraint margin {min_margin:.3e} < 0.")
 
-      u_opt = clip_u(self._unpack(res.x, M))
+      u_opt = clip_u(self._unpack(res.x, num_optimized))
       for did, u_seq in zip(opt_ids, u_opt, strict=True):
          self._u_prev[did] = u_seq
 
@@ -210,13 +208,13 @@ class CentralMPCGlobalCoordinator:
       - Room boundary constraints (with wall_tolerance)
       - Velocity magnitude constraints
       """
-      M = len(drones)
-      u = self._unpack(u_flat, M)
-      X_opt = self._predict_states(drones, u)
-      P_opt = X_opt[:, :, :3]
-      V_opt = X_opt[:, :, 3:6]
+      num_drones = len(drones)
+      u = self._unpack(u_flat, num_drones)
+      predicted_states = self._predict_states(drones, u)
+      predicted_positions = predicted_states[:, :, :3]
+      predicted_velocities = predicted_states[:, :, 3:6]
 
-      pred_pos = {drones[i].drone_id: P_opt[i] for i in range(M)}
+      pred_pos = {drones[i].drone_id: predicted_positions[i] for i in range(num_drones)}
       vals = np.array([], dtype=float)
 
       # Drone-to-drone collision avoidance (i<j pairs, includes cons_stop)
@@ -234,6 +232,6 @@ class CentralMPCGlobalCoordinator:
 
       # Velocity magnitude constraints
       velocity_c = VelocityConstraints(horizon=self.horizon)
-      vals = velocity_c.evaluate_multi(drones, V_opt, vals)
+      vals = velocity_c.evaluate_multi(drones, predicted_velocities, vals)
 
       return vals

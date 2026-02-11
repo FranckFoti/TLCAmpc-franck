@@ -96,7 +96,7 @@ class TestSimulatorLoadsDMPCConfig:
         assert isinstance(coord, DistributedMPCCoordinator)
         assert coord.comm_radius == 5.0
 
-
+@pytest.mark.slow
 class TestSimulatorStepWithDMPC:
     """Tests for running simulation steps with DMPC coordinator."""
 
@@ -228,7 +228,7 @@ class TestSimulatorStepWithDMPC:
                         f"threshold={col['threshold']:.3f}"
                     )
 
-
+@pytest.mark.slow
 class TestDMPCVsCentralComparison:
     """Tests comparing DMPC and central MPC behavior."""
 
@@ -299,7 +299,6 @@ class TestDMPCVsCentralComparison:
         assert central_collisions <= 5, f"Central MPC had {central_collisions} collisions"
         assert dmpc_collisions <= 10, f"DMPC had {dmpc_collisions} collisions"
 
-    @pytest.mark.skip
     def test_both_reach_targets(self):
         """Test both coordinators get drones to their targets."""
         base_drones = [
@@ -364,7 +363,7 @@ class TestDMPCVsCentralComparison:
                 f"DMPC drone {i} final distance {dmpc_dist:.2f} > {tolerance}"
             )
 
-
+@pytest.mark.slow
 class TestDMPCWithCommRadius:
     """Tests for DMPC with limited communication radius."""
 

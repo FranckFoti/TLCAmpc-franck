@@ -40,12 +40,11 @@ class TrajectoryMailbox:
     ) -> None:
         """Broadcast trajectory message to all neighbors.
 
-        Args:
-            sender_id: ID of the sending drone
-            trajectory: Predicted positions (H, 3)
-            safety_zone: Sender's safety zone radius
-            timestamp: Simulation timestep when message was created
-            neighbor_graph: NeighborGraph for determining recipients
+        :param sender_id: ID of the sending drone
+        :param trajectory: Predicted positions (H, 3)
+        :param safety_zone: Sender's safety zone radius
+        :param timestamp: Simulation timestep when message was created
+        :param neighbor_graph: NeighborGraph for determining recipients
         """
         trajectory = np.asarray(trajectory, dtype=float)
         message = TrajectoryMessage(
@@ -65,12 +64,8 @@ class TrajectoryMailbox:
     def receive(self, receiver_id: str) -> dict[str, TrajectoryMessage]:
         """Receive all messages for a drone.
 
-        Args:
-            receiver_id: ID of the receiving drone
-
-        Returns:
-            Dict mapping sender_id to TrajectoryMessage.
-            Returns empty dict if no messages.
+        :param receiver_id: ID of the receiving drone
+        :return: Dict mapping sender_id to TrajectoryMessage. Returns empty dict if no messages.
         """
         return self._inbox.get(receiver_id, {}).copy()
 
@@ -84,8 +79,7 @@ class TrajectoryMailbox:
     def clear_drone(self, drone_id: str) -> None:
         """Clear inbox for a specific drone.
 
-        Args:
-            drone_id: ID of the drone whose inbox to clear
+        :param drone_id: ID of the drone whose inbox to clear
         """
         if drone_id in self._inbox:
             del self._inbox[drone_id]

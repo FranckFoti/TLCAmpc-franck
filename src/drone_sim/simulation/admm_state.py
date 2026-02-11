@@ -33,8 +33,7 @@ class ADMMState:
     def initialize(self, neighbor_pairs: list[tuple[str, str]]) -> None:
         """Initialize dual and auxiliary variables for all neighbor pairs.
 
-        Args:
-            neighbor_pairs: List of (drone_i, drone_j) pairs to track
+        :param neighbor_pairs: List of (drone_i, drone_j) pairs to track
         """
         self._lambdas.clear()
         self._z.clear()
@@ -58,11 +57,10 @@ class ADMMState:
         z-update: z_ij = proj( (p_i - p_j) + lambda_ij / rho )
         Projection enforces ||z_ij[k]|| >= min_dist at each timestep.
 
-        Args:
-            pair: (drone_i, drone_j) pair
-            traj_i: Trajectory of drone i, shape (H, 3)
-            traj_j: Trajectory of drone j, shape (H, 3)
-            min_dist: Minimum required distance
+        :param pair: (drone_i, drone_j) pair
+        :param traj_i: Trajectory of drone i, shape (H, 3)
+        :param traj_j: Trajectory of drone j, shape (H, 3)
+        :param min_dist: Minimum required distance
         """
         canonical = self._canonicalize_pair(pair)
         if canonical not in self._lambdas:
@@ -107,10 +105,9 @@ class ADMMState:
 
         Dual update: lambda = lambda + rho * ((p_i - p_j) - z_ij)
 
-        Args:
-            pair: (drone_i, drone_j) pair
-            traj_i: Trajectory of drone i, shape (H, 3)
-            traj_j: Trajectory of drone j, shape (H, 3)
+        :param pair: (drone_i, drone_j) pair
+        :param traj_i: Trajectory of drone i, shape (H, 3)
+        :param traj_j: Trajectory of drone j, shape (H, 3)
         """
         canonical = self._canonicalize_pair(pair)
         if canonical not in self._lambdas:
@@ -137,13 +134,10 @@ class ADMMState:
         Sum over neighbors j: lambda_ij + rho * (p_i - p_j - z_ij)
         Sign depends on whether drone_id is the first or second in the pair.
 
-        Args:
-            drone_id: ID of the drone
-            trajectories: Dict mapping drone_id to trajectory (H, 3)
-            neighbor_graph: NeighborGraph for determining neighbors
-
-        Returns:
-            Consensus term (H, 3) to add to local gradient
+        :param drone_id: ID of the drone
+        :param trajectories: Dict mapping drone_id to trajectory (H, 3)
+        :param neighbor_graph: NeighborGraph for determining neighbors
+        :return: Consensus term (H, 3) to add to local gradient
         """
         result = np.zeros((self.horizon, 3), dtype=float)
         neighbors = neighbor_graph.get_neighbors(drone_id)
@@ -188,11 +182,8 @@ class ADMMState:
         Primal residual: max over pairs of ||p_i - p_j - z_ij||
         Dual residual: rho * max over pairs of ||z_ij - z_ij_prev||
 
-        Args:
-            trajectories: Dict mapping drone_id to trajectory (H, 3)
-
-        Returns:
-            (primal_residual, dual_residual)
+        :param trajectories: Dict mapping drone_id to trajectory (H, 3)
+        :return: (primal_residual, dual_residual)
         """
         primal_residuals = []
         dual_residuals = []
@@ -228,11 +219,8 @@ class ADMMState:
 
         Converged when both primal and dual residuals are below tolerances.
 
-        Args:
-            trajectories: Dict mapping drone_id to trajectory (H, 3)
-
-        Returns:
-            True if converged
+        :param trajectories: Dict mapping drone_id to trajectory (H, 3)
+        :return: True if converged
         """
         primal, dual = self.compute_residuals(trajectories)
         return primal < self.primal_tol and dual < self.dual_tol
@@ -240,11 +228,8 @@ class ADMMState:
     def get_lambda(self, pair: tuple[str, str]) -> np.ndarray | None:
         """Get dual variable for a pair (for debugging/visualization).
 
-        Args:
-            pair: (drone_i, drone_j) pair
-
-        Returns:
-            Lambda array (H, 3) or None if pair not tracked
+        :param pair: (drone_i, drone_j) pair
+        :return: Lambda array (H, 3) or None if pair not tracked
         """
         canonical = self._canonicalize_pair(pair)
         lam = self._lambdas.get(canonical)
@@ -253,11 +238,8 @@ class ADMMState:
     def get_z(self, pair: tuple[str, str]) -> np.ndarray | None:
         """Get auxiliary variable for a pair (for debugging/visualization).
 
-        Args:
-            pair: (drone_i, drone_j) pair
-
-        Returns:
-            Z array (H, 3) or None if pair not tracked
+        :param pair: (drone_i, drone_j) pair
+        :return: Z array (H, 3) or None if pair not tracked
         """
         canonical = self._canonicalize_pair(pair)
         z = self._z.get(canonical)

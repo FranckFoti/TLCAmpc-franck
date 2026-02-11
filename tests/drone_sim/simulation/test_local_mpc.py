@@ -84,8 +84,8 @@ class TestLocalMPCSolver:
         assert u_opt.shape == (5, 3)
         assert traj_opt.shape == (5, 3)
         # Should try to avoid the neighbor
-        for k in range(5):
-            dist = np.linalg.norm(traj_opt[k] - np.array([2.0, 0.0, 0.0]))
+        for step in range(5):
+            dist = np.linalg.norm(traj_opt[step] - np.array([2.0, 0.0, 0.0]))
             assert dist >= 1.8 or not success
 
     def test_solve_with_static_obstacle(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
@@ -127,10 +127,10 @@ class TestLocalMPCSolver:
 
         assert u_opt.shape == (5, 3)
         if success:
-            for k in range(5):
-                for d in range(3):
-                    assert traj_opt[k, d] >= room_min[d] + drone.safety_zone - 0.1
-                    assert traj_opt[k, d] <= room_max[d] - drone.safety_zone + 0.1
+            for step in range(5):
+                for axis in range(3):
+                    assert traj_opt[step, axis] >= room_min[axis] + drone.safety_zone - 0.1
+                    assert traj_opt[step, axis] <= room_max[axis] - drone.safety_zone + 0.1
 
     def test_warm_start(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Warm start from previous solution."""
@@ -166,12 +166,12 @@ class TestLocalMPCSolver:
         d1 = _make_drone(x=np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0]), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)  # Moving in +x
         u = np.zeros((5, 3))  # No acceleration
 
-        P = solver._predict_positions(d1, u)
+        predicted_positions = solver._predict_positions(d1, u)
 
-        assert P.shape == (5, 3)
+        assert predicted_positions.shape == (5, 3)
         # Position should increase due to initial velocity
-        assert P[0, 0] > 0.0
-        assert P[-1, 0] > P[0, 0]
+        assert predicted_positions[0, 0] > 0.0
+        assert predicted_positions[-1, 0] > predicted_positions[0, 0]
 
     def test_infeasible_returns_false(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Infeasible problem should return success=False."""
@@ -235,41 +235,41 @@ class TestLocalMPCSolverPredictPositions:
         d1 = _make_drone(x=np.zeros(6), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.zeros((5, 3))
 
-        P = solver._predict_positions(d1, u)
+        predicted_positions = solver._predict_positions(d1, u)
 
-        assert P.shape == (5, 3)
+        assert predicted_positions.shape == (5, 3)
 
     def test_predict_positions_zero_control_zero_velocity(self, solver: LocalMPCSolver):
         """Test positions stay at origin with zero velocity and control."""
         d1 = _make_drone(x=np.zeros(6), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.zeros((5, 3))
 
-        P = solver._predict_positions(d1, u)
+        predicted_positions = solver._predict_positions(d1, u)
 
-        np.testing.assert_array_almost_equal(P, np.zeros((5, 3)), decimal=10)
+        np.testing.assert_array_almost_equal(predicted_positions, np.zeros((5, 3)), decimal=10)
 
     def test_predict_positions_constant_velocity(self, solver: LocalMPCSolver):
         """Test positions evolve correctly with constant velocity."""
         d1 = _make_drone(x=np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0]), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.zeros((5, 3))
 
-        P = solver._predict_positions(d1, u)
+        predicted_positions = solver._predict_positions(d1, u)
 
-        for k in range(5):
-            assert P[k, 0] > 0
-            assert abs(P[k, 1]) < 1e-10
-            assert abs(P[k, 2]) < 1e-10
+        for step in range(5):
+            assert predicted_positions[step, 0] > 0
+            assert abs(predicted_positions[step, 1]) < 1e-10
+            assert abs(predicted_positions[step, 2]) < 1e-10
 
     def test_predict_positions_with_acceleration(self, solver: LocalMPCSolver):
         """Test positions evolve correctly with constant acceleration."""
         d1 = _make_drone(x=np.zeros(6), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.ones((5, 3))
 
-        P = solver._predict_positions(d1, u)
+        predicted_positions = solver._predict_positions(d1, u)
 
-        for k in range(5):
-            for d in range(3):
-                assert P[k, d] > 0
+        for step in range(5):
+            for axis in range(3):
+                assert predicted_positions[step, axis] > 0
 
-        for d in range(3):
-            assert P[-1, d] > P[0, d]
+        for axis in range(3):
+            assert predicted_positions[-1, axis] > predicted_positions[0, axis]

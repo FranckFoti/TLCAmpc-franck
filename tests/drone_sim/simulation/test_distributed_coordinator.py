@@ -128,6 +128,7 @@ class TestDistributedCoordinatorConvergence:
         assert np.all(np.isfinite(result["drone-2"]))
 
 
+@pytest.mark.slow
 class TestDistributedCoordinatorCollisionAvoidance:
     """Tests for collision avoidance."""
 

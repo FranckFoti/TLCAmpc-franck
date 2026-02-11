@@ -18,8 +18,7 @@ class NeighborGraph:
     def update(self, positions: dict[str, np.ndarray]) -> None:
         """Update neighbor graph based on current drone positions.
 
-        Args:
-            positions: Dict mapping drone_id to position array (3,)
+        :param positions: Dict mapping drone_id to position array (3,)
         """
         # Store positions
         self._positions = {k: np.asarray(v, dtype=float).reshape(3)

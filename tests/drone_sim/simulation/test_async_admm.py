@@ -59,6 +59,7 @@ class TestAsyncADMMDeadlockPrevention:
             # Fail if stuck for too many consecutive steps
             assert stuck_count < 10, f"Drones stuck for {stuck_count} steps at step {step}"
 
+    @pytest.mark.slow
     def test_gauss_seidel_breaks_symmetry(self):
         """Two head-on drones should eventually pass each other."""
         # Create minimal 2-drone head-on scenario
@@ -113,6 +114,7 @@ class TestAsyncADMMDeadlockPrevention:
         assert hasattr(coord, "_compute_priority")
         assert callable(coord._compute_priority)
 
+    @pytest.mark.slow
     def test_no_hard_collision_in_head_on_scenario(self):
         """Drones should avoid hard collisions (physical radii overlap).
 
