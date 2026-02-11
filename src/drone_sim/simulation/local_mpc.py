@@ -25,27 +25,9 @@ class LocalMPCSolver:
     dt: float
     horizon: int
 
-    # Safety parameters
-    safety_zone: float = 1.0  # This drone's safety zone
-
-    # Control bounds
-    u_min: np.ndarray | None = None
-    u_max: np.ndarray | None = None
-
     # Optimizer settings
     max_iter: int = 100
     f_tol: float = 1e-4
-
-    def __post_init__(self) -> None:
-        self._phys = LinearKinematicsPhysics(dt=self.dt)
-        if self.u_min is None:
-            self.u_min = np.array([-3.0, -3.0, -3.0])
-        else:
-            self.u_min = np.asarray(self.u_min, dtype=float)
-        if self.u_max is None:
-            self.u_max = np.array([3.0, 3.0, 3.0])
-        else:
-            self.u_max = np.asarray(self.u_max, dtype=float)
 
     def solve(
         self,
@@ -75,8 +57,8 @@ class LocalMPCSolver:
         controller = drone.controller
         obstacles = obstacles or []
 
-        u_min = self.u_min
-        u_max = self.u_max
+        u_min = drone.bounds()[0]
+        u_max = drone.bounds()[1]
         H = self.horizon
 
         # Initial guess
@@ -102,14 +84,14 @@ class LocalMPCSolver:
         def constraints(u_flat: np.ndarray) -> np.ndarray:
             u = u_flat.reshape((H, 3))
             u = np.clip(u, u_min, u_max)
-            P = self._predict_positions(x0, u)
+            P = self._predict_positions(drone, u)
 
             vals = []
 
             # Neighbor collision avoidance (treat as moving obstacles)
             for neighbor_id, (neighbor_traj, neighbor_sz) in neighbor_trajectories.items():
                 neighbor_traj = np.asarray(neighbor_traj, dtype=float).reshape((H, 3))
-                min_dist = self.safety_zone + neighbor_sz
+                min_dist = drone.safety_zone + neighbor_sz
 
                 for k in range(H):
                     dist = float(np.linalg.norm(P[k] - neighbor_traj[k]))
@@ -118,7 +100,7 @@ class LocalMPCSolver:
             # Static obstacles
             for center, radius in obstacles:
                 c = np.asarray(center, dtype=float).reshape(3)
-                min_dist = self.safety_zone + radius
+                min_dist = drone.safety_zone + radius
                 for k in range(H):
                     dist = float(np.linalg.norm(P[k] - c))
                     vals.append(dist - min_dist)
@@ -130,9 +112,9 @@ class LocalMPCSolver:
                 for k in range(H):
                     for d in range(3):
                         # Lower bound: p - safety_zone >= room_min
-                        vals.append(P[k, d] - self.safety_zone - r_min[d])
+                        vals.append(P[k, d] - drone.safety_zone - r_min[d])
                         # Upper bound: p + safety_zone <= room_max
-                        vals.append(r_max[d] - P[k, d] - self.safety_zone)
+                        vals.append(r_max[d] - P[k, d] - drone.safety_zone)
 
             return np.asarray(vals, dtype=float)
 
@@ -153,7 +135,7 @@ class LocalMPCSolver:
         )
 
         u_opt = np.clip(result.x.reshape((H, 3)), u_min, u_max)
-        traj_opt = self._predict_positions(x0, u_opt)
+        traj_opt = self._predict_positions(drone, u_opt)
 
         # Check constraint satisfaction
         g = constraints(u_opt.flatten())
@@ -161,7 +143,7 @@ class LocalMPCSolver:
 
         return u_opt, traj_opt, feasible
 
-    def _predict_positions(self, x0: np.ndarray, u: np.ndarray) -> np.ndarray:
+    def _predict_positions(self, drone: Drone, u: np.ndarray) -> np.ndarray:
         """Predict position trajectory from state and controls.
 
         Args:
@@ -171,15 +153,13 @@ class LocalMPCSolver:
         Returns:
             P: Position trajectory (H, 3)
         """
-        A = self._phys.A
-        B = self._phys.B
         H = u.shape[0]
 
-        P = np.zeros((H, 3), dtype=float)
-        x = x0.copy()
+        x = np.asarray(drone.x, dtype=float).reshape(6)
+        predicted = np.zeros((H, 3), dtype=float)
 
         for k in range(H):
-            x = A @ x + B @ u[k]
-            P[k] = x[:3]
+            x = drone.physics.step(x, u[k])
+            predicted[k] = x[:3]
 
-        return P
+        return predicted

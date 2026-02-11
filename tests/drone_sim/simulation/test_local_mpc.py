@@ -40,7 +40,7 @@ class TestLocalMPCSolver:
 
     @pytest.fixture
     def solver(self) -> LocalMPCSolver:
-        return LocalMPCSolver(dt=0.1, horizon=5, safety_zone=1.0)
+        return LocalMPCSolver(dt=0.1, horizon=5)
 
     @pytest.fixture
     def controller(self) -> CentralMPCAgent:
@@ -129,8 +129,8 @@ class TestLocalMPCSolver:
         if success:
             for k in range(5):
                 for d in range(3):
-                    assert traj_opt[k, d] >= room_min[d] + solver.safety_zone - 0.1
-                    assert traj_opt[k, d] <= room_max[d] - solver.safety_zone + 0.1
+                    assert traj_opt[k, d] >= room_min[d] + drone.safety_zone - 0.1
+                    assert traj_opt[k, d] <= room_max[d] - drone.safety_zone + 0.1
 
     def test_warm_start(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Warm start from previous solution."""
@@ -163,10 +163,10 @@ class TestLocalMPCSolver:
 
     def test_predict_positions(self, solver: LocalMPCSolver):
         """Test position prediction from controls."""
-        x0 = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0])  # Moving in +x
+        d1 = _make_drone(x=np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0]), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)  # Moving in +x
         u = np.zeros((5, 3))  # No acceleration
 
-        P = solver._predict_positions(x0, u)
+        P = solver._predict_positions(d1, u)
 
         assert P.shape == (5, 3)
         # Position should increase due to initial velocity
@@ -206,7 +206,6 @@ class TestLocalMPCSolverInit:
         solver = LocalMPCSolver(dt=0.1, horizon=5)
         assert solver.dt == 0.1
         assert solver.horizon == 5
-        assert solver.safety_zone == 1.0
         assert solver.max_iter == 100
         assert solver.f_tol == 1e-4
 
@@ -215,21 +214,13 @@ class TestLocalMPCSolverInit:
         solver = LocalMPCSolver(
             dt=0.05,
             horizon=10,
-            safety_zone=0.5,
             max_iter=200,
             f_tol=1e-6,
         )
         assert solver.dt == 0.05
         assert solver.horizon == 10
-        assert solver.safety_zone == 0.5
         assert solver.max_iter == 200
         assert solver.f_tol == 1e-6
-
-    def test_init_creates_physics_model(self):
-        """Test __post_init__ creates internal physics model."""
-        solver = LocalMPCSolver(dt=0.1, horizon=5)
-        assert hasattr(solver, "_phys")
-        assert solver._phys.dt == 0.1
 
 
 class TestLocalMPCSolverPredictPositions:
@@ -241,28 +232,28 @@ class TestLocalMPCSolverPredictPositions:
 
     def test_predict_positions_correct_shape(self, solver: LocalMPCSolver):
         """Test _predict_positions returns correct shape."""
-        x0 = np.zeros(6)
+        d1 = _make_drone(x=np.zeros(6), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.zeros((5, 3))
 
-        P = solver._predict_positions(x0, u)
+        P = solver._predict_positions(d1, u)
 
         assert P.shape == (5, 3)
 
     def test_predict_positions_zero_control_zero_velocity(self, solver: LocalMPCSolver):
         """Test positions stay at origin with zero velocity and control."""
-        x0 = np.zeros(6)
+        d1 = _make_drone(x=np.zeros(6), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.zeros((5, 3))
 
-        P = solver._predict_positions(x0, u)
+        P = solver._predict_positions(d1, u)
 
         np.testing.assert_array_almost_equal(P, np.zeros((5, 3)), decimal=10)
 
     def test_predict_positions_constant_velocity(self, solver: LocalMPCSolver):
         """Test positions evolve correctly with constant velocity."""
-        x0 = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+        d1 = _make_drone(x=np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0]), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.zeros((5, 3))
 
-        P = solver._predict_positions(x0, u)
+        P = solver._predict_positions(d1, u)
 
         for k in range(5):
             assert P[k, 0] > 0
@@ -271,10 +262,10 @@ class TestLocalMPCSolverPredictPositions:
 
     def test_predict_positions_with_acceleration(self, solver: LocalMPCSolver):
         """Test positions evolve correctly with constant acceleration."""
-        x0 = np.zeros(6)
+        d1 = _make_drone(x=np.zeros(6), target=np.array([2.0, 0.0, 0.0]), controller=CentralMPCAgent)
         u = np.ones((5, 3))
 
-        P = solver._predict_positions(x0, u)
+        P = solver._predict_positions(d1, u)
 
         for k in range(5):
             for d in range(3):
