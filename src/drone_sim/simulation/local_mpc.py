@@ -1,9 +1,15 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 import numpy as np
 from scipy.optimize import minimize
 
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
+
+if TYPE_CHECKING:
+    from drone_sim.domain.drone import Drone
 
 
 @dataclass
@@ -22,18 +28,28 @@ class LocalMPCSolver:
     # Safety parameters
     safety_zone: float = 1.0  # This drone's safety zone
 
+    # Control bounds
+    u_min: np.ndarray | None = None
+    u_max: np.ndarray | None = None
+
     # Optimizer settings
     max_iter: int = 100
     f_tol: float = 1e-4
 
     def __post_init__(self) -> None:
         self._phys = LinearKinematicsPhysics(dt=self.dt)
+        if self.u_min is None:
+            self.u_min = np.array([-3.0, -3.0, -3.0])
+        else:
+            self.u_min = np.asarray(self.u_min, dtype=float)
+        if self.u_max is None:
+            self.u_max = np.array([3.0, 3.0, 3.0])
+        else:
+            self.u_max = np.asarray(self.u_max, dtype=float)
 
     def solve(
         self,
-        x0: np.ndarray,
-        p_ref: np.ndarray,
-        controller,  # CentralCostProvider
+        drone: Drone,
         neighbor_trajectories: dict[str, tuple[np.ndarray, float]],
         obstacles: list[tuple[np.ndarray, float]] | None = None,
         room_min: np.ndarray | None = None,
@@ -43,9 +59,7 @@ class LocalMPCSolver:
         """Solve local MPC problem for a single drone.
 
         Args:
-            x0: Current state (6,) - [position, velocity]
-            p_ref: Reference position (3,)
-            controller: Controller with central_cost, central_bounds, central_initial_guess
+            drone: Drone object with state, route, controller, and physics
             neighbor_trajectories: Dict mapping neighbor_id to (trajectory (H,3), safety_zone)
             obstacles: List of (center, radius) static obstacles
             room_min: Room lower bounds (3,) or None
@@ -57,11 +71,12 @@ class LocalMPCSolver:
             traj_opt: Optimized position trajectory (H, 3)
             success: Whether optimization succeeded
         """
-        x0 = np.asarray(x0, dtype=float).reshape(6)
-        p_ref = np.asarray(p_ref, dtype=float).reshape(3)
+        x0 = np.asarray(drone.x, dtype=float).reshape(6)
+        controller = drone.controller
         obstacles = obstacles or []
 
-        u_min, u_max = controller.central_bounds()
+        u_min = self.u_min
+        u_max = self.u_max
         H = self.horizon
 
         # Initial guess
@@ -69,7 +84,7 @@ class LocalMPCSolver:
             # Warm-start: shift previous solution
             u0 = np.concatenate([u_prev[1:], u_prev[-1:]], axis=0)
         else:
-            u0 = controller.central_initial_guess(x0, p_ref)
+            u0 = controller.central_initial_guess(drone)
             # Ensure correct horizon length
             if u0.shape[0] < H:
                 pad = np.tile(u0[-1:], (H - u0.shape[0], 1))
@@ -82,7 +97,7 @@ class LocalMPCSolver:
         def cost(u_flat: np.ndarray) -> float:
             u = u_flat.reshape((H, 3))
             u = np.clip(u, u_min, u_max)
-            return controller.central_cost(u, x0, p_ref)
+            return controller.central_cost(u, drone)
 
         def constraints(u_flat: np.ndarray) -> np.ndarray:
             u = u_flat.reshape((H, 3))

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from drone_sim.domain.drone import Drone
 from drone_sim.domain.registry import register_coordinator
 from drone_sim.simulation.admm_state import ADMMState
 from drone_sim.simulation.local_mpc import LocalMPCSolver
@@ -17,7 +18,7 @@ def _has_central_cost(ctrl: object) -> bool:
     """Check if controller implements the central_cost interface."""
     return all(
         hasattr(ctrl, name)
-        for name in ("central_cost", "central_bounds", "central_initial_guess", "horizon")
+        for name in ("central_cost", "central_initial_guess", "horizon")
     )
 
 
@@ -67,42 +68,30 @@ class DistributedMPCCoordinator:
     def solve_controls(
         self,
         *,
-        drone_ids: list[str],
-        xs: list[np.ndarray],
-        prefs: list[np.ndarray],
-        radii: list[float],
-        safety_zones: list[float],
-        cons_stops: list[float],
-        v_maxs: list[float] | None = None,  # Not yet used by distributed solver
-        controllers: list[object],
+        drones: list[Drone],
         obstacles: list[tuple[np.ndarray, float]],
-        external_predictions: dict[str, np.ndarray] | None = None,
-        all_drone_state: dict[str, tuple[np.ndarray, np.ndarray, float]] | None = None,
         room_min: np.ndarray | None = None,
         room_max: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
         """Solve for drone controls using distributed ADMM optimization.
-
         Matches the CentralMPCGlobalCoordinator interface.
 
         Args:
-            drone_ids: List of drone IDs to optimize
-            xs: List of current states (6,) for each drone [position, velocity]
-            prefs: List of reference positions (3,) for each drone
-            radii: List of physical radii for each drone
-            safety_zones: List of safety zones for each drone
-            cons_stops: List of conservative stop distances for each drone
-            controllers: List of controller objects for each drone
+            drones: List of Drone objects to optimize
             obstacles: List of (center, radius) static obstacles
-            external_predictions: Optional trajectory overrides for external drones
-            all_drone_state: State of all drones including non-optimized ones
             room_min: Room lower bounds (3,) or None
             room_max: Room upper bounds (3,) or None
 
         Returns:
             Dict mapping drone_id to control (3,) for first timestep
         """
-        n = len(drone_ids)
+        # Extract values from Drone objects
+        drone_ids = [d.drone_id for d in drones]
+        xs = [d.x for d in drones]
+        safety_zones = [d.safety_zone for d in drones]
+        controllers = [d.controller for d in drones]
+
+        n = len(drones)
 
         # Identify which drones to optimize (must have central_cost interface)
         idx_opt = [i for i in range(n) if _has_central_cost(controllers[i])]
@@ -134,15 +123,17 @@ class DistributedMPCCoordinator:
         for drone_id in opt_ids:
             i = idx_by_id[drone_id]
             x0 = np.asarray(xs[i], dtype=float).reshape(6)
-            p_ref = np.asarray(prefs[i], dtype=float).reshape(3)
             controller = controllers[i]
             safety_zone = float(safety_zones[i])
 
-            # Create local solver for this drone
+            # Create local solver for this drone with bounds from physics
+            drone_u_min, drone_u_max = drones[i].bounds()
             local_solvers[drone_id] = LocalMPCSolver(
                 dt=self.dt,
                 horizon=self.horizon,
                 safety_zone=safety_zone,
+                u_min=drone_u_min,
+                u_max=drone_u_max,
             )
 
             # Initialize trajectory from warm-start or initial guess
@@ -152,7 +143,7 @@ class DistributedMPCCoordinator:
                 u0 = np.concatenate([u_prev[1:], u_prev[-1:]], axis=0)
             else:
                 # Get initial guess from controller
-                u0 = controller.central_initial_guess(x0, p_ref)
+                u0 = controller.central_initial_guess(drones[i])
                 u0 = np.asarray(u0, dtype=float).reshape((-1, 3))
                 # Pad/trim to horizon
                 if u0.shape[0] < self.horizon:
@@ -202,9 +193,6 @@ class DistributedMPCCoordinator:
                 # Gauss-Seidel: immediate updates after each drone solves
                 for drone_id in drone_order:
                     i = idx_by_id[drone_id]
-                    x0 = np.asarray(xs[i], dtype=float).reshape(6)
-                    p_ref = np.asarray(prefs[i], dtype=float).reshape(3)
-                    controller = controllers[i]
                     solver = local_solvers[drone_id]
 
                     # Get neighbor trajectories from mailbox (includes any updates)
@@ -223,9 +211,7 @@ class DistributedMPCCoordinator:
 
                     # Solve local MPC
                     u_opt, traj_opt, success = solver.solve(
-                        x0=x0,
-                        p_ref=p_ref,
-                        controller=controller,
+                        drone=drones[i],
                         neighbor_trajectories=neighbor_trajectories,
                         obstacles=obstacles,
                         room_min=room_min,
@@ -252,9 +238,6 @@ class DistributedMPCCoordinator:
 
                 for drone_id in drone_order:
                     i = idx_by_id[drone_id]
-                    x0 = np.asarray(xs[i], dtype=float).reshape(6)
-                    p_ref = np.asarray(prefs[i], dtype=float).reshape(3)
-                    controller = controllers[i]
                     solver = local_solvers[drone_id]
 
                     # Get neighbor trajectories from mailbox
@@ -276,9 +259,7 @@ class DistributedMPCCoordinator:
 
                     # Solve local MPC
                     u_opt, traj_opt, success = solver.solve(
-                        x0=x0,
-                        p_ref=p_ref,
-                        controller=controller,
+                        drone=drones[i],
                         neighbor_trajectories=neighbor_trajectories_jac,
                         obstacles=obstacles,
                         room_min=room_min,

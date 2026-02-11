@@ -13,6 +13,7 @@ from numpy.testing import assert_array_almost_equal, assert_array_equal
 
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.controllers.central_cost import CentralMPCAgent
+from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 
 
 class TestRoute:
@@ -200,11 +201,11 @@ class TestDrone:
          radius=0.2,
          safety_zone=1.0,
          cons_stop=0.0,
-         v_max=5.0,
          color="red",
          safety_color="orange",
          trace_color="blue",
          controller=sample_controller,
+         physics=LinearKinematicsPhysics(dt=0.1),
          x=np.array([1e6, 1e6, 1e6, 1e3, 1e3, 1e3], dtype=float),
          route=sample_route
       )
@@ -218,11 +219,11 @@ class TestDrone:
          radius=0.2,
          safety_zone=1.0,
          cons_stop=0.0,
-         v_max=5.0,
          color="red",
          safety_color="orange",
          trace_color="blue",
          controller=sample_controller,
+         physics=LinearKinematicsPhysics(dt=0.1),
          x=np.array([-10.0, -20.0, -5.0, -1.0, -2.0, -0.5], dtype=float),
          route=sample_route
       )

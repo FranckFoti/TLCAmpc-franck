@@ -9,6 +9,7 @@ ColorValue = str | list[float]
 
 class PhysicsSpec(BaseModel):
    type: str
+   id: str | None = None
    params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -26,6 +27,9 @@ class DroneConfig(BaseModel):
    # Optional per-drone controller override (otherwise ScenarioConfig.controller is used).
    controller: ControllerSpec | None = None
 
+   # Physics model ID referencing a PhysicsSpec by name (None = use global physics).
+   physics: str | None = None
+
    # Drone physical radius (used for room clamping and visualization).
    radius: float = 0.2
 
@@ -34,9 +38,6 @@ class DroneConfig(BaseModel):
 
    # Conservative stopping addition, like it is shown in the paper
    cons_stop: float = 0.0
-
-   # Maximum velocity magnitude (m/s) for trajectory optimization constraint.
-   v_max: float = 5.0
 
    # Colors used by the renderer. Each field accepts either:
    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
@@ -63,7 +64,7 @@ class RoomConfig(BaseModel):
 
 class ScenarioConfig(BaseModel):
    dt: float = 0.1
-   physics: PhysicsSpec
+   physics: PhysicsSpec | list[PhysicsSpec]
 
    # Default controller used for drones that do not define DroneConfig.controller.
    controller: ControllerSpec

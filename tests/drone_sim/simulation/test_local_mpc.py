@@ -9,6 +9,30 @@ import numpy as np
 import pytest
 from drone_sim.simulation.local_mpc import LocalMPCSolver
 from drone_sim.controllers.central_cost import CentralMPCAgent
+from drone_sim.domain.drone import Drone, Route
+from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
+
+
+def _make_drone(
+    x: np.ndarray,
+    target: np.ndarray,
+    controller: CentralMPCAgent,
+    dt: float = 0.1,
+) -> Drone:
+    """Helper to create a Drone for local MPC testing."""
+    return Drone(
+        drone_id="test-drone",
+        radius=0.2,
+        safety_zone=1.0,
+        cons_stop=0.0,
+        color="tab:blue",
+        safety_color="tab:cyan",
+        trace_color="tab:blue",
+        controller=controller,
+        physics=LinearKinematicsPhysics(dt=dt),
+        x=np.asarray(x, dtype=float).reshape(6),
+        route=Route(waypoints=[], target=np.asarray(target, dtype=float).reshape(3)),
+    )
 
 
 class TestLocalMPCSolver:
@@ -24,13 +48,14 @@ class TestLocalMPCSolver:
 
     def test_solve_no_obstacles(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Solve with no neighbors or obstacles - should reach target."""
-        x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        p_ref = np.array([2.0, 0.0, 0.0])
+        drone = _make_drone(
+            x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            target=np.array([2.0, 0.0, 0.0]),
+            controller=controller,
+        )
 
         u_opt, traj_opt, success = solver.solve(
-            x0=x0,
-            p_ref=p_ref,
-            controller=controller,
+            drone=drone,
             neighbor_trajectories={},
         )
 
@@ -42,41 +67,39 @@ class TestLocalMPCSolver:
 
     def test_solve_with_neighbor(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Solve with a neighbor blocking direct path."""
-        x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        p_ref = np.array([4.0, 0.0, 0.0])
+        drone = _make_drone(
+            x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            target=np.array([4.0, 0.0, 0.0]),
+            controller=controller,
+        )
 
         # Neighbor stationary at (2, 0, 0) - directly in path
         neighbor_traj = np.tile(np.array([[2.0, 0.0, 0.0]]), (5, 1))
 
         u_opt, traj_opt, success = solver.solve(
-            x0=x0,
-            p_ref=p_ref,
-            controller=controller,
+            drone=drone,
             neighbor_trajectories={"neighbor-1": (neighbor_traj, 1.0)},
         )
 
         assert u_opt.shape == (5, 3)
         assert traj_opt.shape == (5, 3)
         # Should try to avoid the neighbor
-        # Check that we don't get too close to (2, 0, 0)
         for k in range(5):
             dist = np.linalg.norm(traj_opt[k] - np.array([2.0, 0.0, 0.0]))
-            # Should maintain at least safety_zone + neighbor_sz = 2.0
-            # Allow small tolerance for optimization
             assert dist >= 1.8 or not success
 
     def test_solve_with_static_obstacle(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Solve with a static obstacle."""
-        x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        p_ref = np.array([4.0, 0.0, 0.0])
+        drone = _make_drone(
+            x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            target=np.array([4.0, 0.0, 0.0]),
+            controller=controller,
+        )
 
-        # Obstacle at (2, 0, 0) with radius 0.5
         obstacles = [(np.array([2.0, 0.0, 0.0]), 0.5)]
 
         u_opt, traj_opt, success = solver.solve(
-            x0=x0,
-            p_ref=p_ref,
-            controller=controller,
+            drone=drone,
             neighbor_trajectories={},
             obstacles=obstacles,
         )
@@ -86,23 +109,23 @@ class TestLocalMPCSolver:
 
     def test_solve_with_room_bounds(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Solve within room constraints."""
-        x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        p_ref = np.array([10.0, 0.0, 0.0])  # Target outside room
+        drone = _make_drone(
+            x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            target=np.array([10.0, 0.0, 0.0]),
+            controller=controller,
+        )
 
         room_min = np.array([-5.0, -5.0, -5.0])
         room_max = np.array([5.0, 5.0, 5.0])
 
         u_opt, traj_opt, success = solver.solve(
-            x0=x0,
-            p_ref=p_ref,
-            controller=controller,
+            drone=drone,
             neighbor_trajectories={},
             room_min=room_min,
             room_max=room_max,
         )
 
         assert u_opt.shape == (5, 3)
-        # Should stay within bounds (with safety_zone margin)
         if success:
             for k in range(5):
                 for d in range(3):
@@ -111,23 +134,26 @@ class TestLocalMPCSolver:
 
     def test_warm_start(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Warm start from previous solution."""
-        x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        p_ref = np.array([2.0, 0.0, 0.0])
+        drone1 = _make_drone(
+            x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            target=np.array([2.0, 0.0, 0.0]),
+            controller=controller,
+        )
 
         # First solve
         u_opt1, _, _ = solver.solve(
-            x0=x0,
-            p_ref=p_ref,
-            controller=controller,
+            drone=drone1,
             neighbor_trajectories={},
         )
 
         # Second solve with warm start
-        x1 = np.array([0.1, 0.0, 0.0, 0.5, 0.0, 0.0])  # Moved forward
-        u_opt2, _, success2 = solver.solve(
-            x0=x1,
-            p_ref=p_ref,
+        drone2 = _make_drone(
+            x=np.array([0.1, 0.0, 0.0, 0.5, 0.0, 0.0]),
+            target=np.array([2.0, 0.0, 0.0]),
             controller=controller,
+        )
+        u_opt2, _, success2 = solver.solve(
+            drone=drone2,
             neighbor_trajectories={},
             u_prev=u_opt1,
         )
@@ -149,11 +175,12 @@ class TestLocalMPCSolver:
 
     def test_infeasible_returns_false(self, solver: LocalMPCSolver, controller: CentralMPCAgent):
         """Infeasible problem should return success=False."""
-        x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        p_ref = np.array([0.0, 0.0, 0.0])  # Already at target
+        drone = _make_drone(
+            x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            target=np.array([0.0, 0.0, 0.0]),
+            controller=controller,
+        )
 
-        # Completely surrounded by obstacles (likely infeasible)
-        # This tests graceful handling - optimizer may or may not find solution
         obstacles = [
             (np.array([1.0, 0.0, 0.0]), 0.3),
             (np.array([-1.0, 0.0, 0.0]), 0.3),
@@ -162,14 +189,11 @@ class TestLocalMPCSolver:
         ]
 
         u_opt, traj_opt, success = solver.solve(
-            x0=x0,
-            p_ref=p_ref,
-            controller=controller,
+            drone=drone,
             neighbor_trajectories={},
             obstacles=obstacles,
         )
 
-        # Should return valid arrays regardless of success
         assert u_opt.shape == (5, 3)
         assert traj_opt.shape == (5, 3)
 
@@ -231,35 +255,30 @@ class TestLocalMPCSolverPredictPositions:
 
         P = solver._predict_positions(x0, u)
 
-        # With no velocity and no control, positions should stay at origin
         np.testing.assert_array_almost_equal(P, np.zeros((5, 3)), decimal=10)
 
     def test_predict_positions_constant_velocity(self, solver: LocalMPCSolver):
         """Test positions evolve correctly with constant velocity."""
-        x0 = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0])  # Velocity = [1, 0, 0]
-        u = np.zeros((5, 3))  # No acceleration
+        x0 = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+        u = np.zeros((5, 3))
 
         P = solver._predict_positions(x0, u)
 
-        # Position should increase in x direction
-        # x(k) = x0 + k * dt * v0 approximately
         for k in range(5):
-            assert P[k, 0] > 0  # Should be moving in +x
-            assert abs(P[k, 1]) < 1e-10  # Should stay at y=0
-            assert abs(P[k, 2]) < 1e-10  # Should stay at z=0
+            assert P[k, 0] > 0
+            assert abs(P[k, 1]) < 1e-10
+            assert abs(P[k, 2]) < 1e-10
 
     def test_predict_positions_with_acceleration(self, solver: LocalMPCSolver):
         """Test positions evolve correctly with constant acceleration."""
-        x0 = np.zeros(6)  # Starting at rest
-        u = np.ones((5, 3))  # Constant acceleration in all directions
+        x0 = np.zeros(6)
+        u = np.ones((5, 3))
 
         P = solver._predict_positions(x0, u)
 
-        # All positions should be positive and increasing
         for k in range(5):
             for d in range(3):
                 assert P[k, d] > 0
 
-        # Later positions should be farther
         for d in range(3):
             assert P[-1, d] > P[0, d]

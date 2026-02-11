@@ -2,8 +2,38 @@ import numpy as np
 import pytest
 
 from drone_sim.controllers.central_cost import CentralMPCAgent
+from drone_sim.domain.drone import Drone, Route
 from drone_sim.domain.registry import COORDINATORS
+from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
+
+
+def _make_drone(
+    drone_id: str,
+    x: np.ndarray,
+    target: np.ndarray,
+    controller: object,
+    radius: float = 0.1,
+    safety_zone: float = 0.5,
+    cons_stop: float = 0.0,
+    v_max: float = 5.0,
+    dt: float = 0.1,
+) -> Drone:
+    """Helper to create a Drone object for testing."""
+    physics = LinearKinematicsPhysics(dt=dt, v_max=v_max)
+    return Drone(
+        drone_id=drone_id,
+        radius=radius,
+        safety_zone=safety_zone,
+        cons_stop=cons_stop,
+        color="tab:blue",
+        safety_color="tab:cyan",
+        trace_color="tab:blue",
+        controller=controller,
+        physics=physics,
+        x=np.asarray(x, dtype=float).reshape(6),
+        route=Route(waypoints=[], target=np.asarray(target, dtype=float).reshape(3)),
+    )
 
 
 class TestDistributedCoordinatorRegistration:
@@ -41,19 +71,10 @@ class TestDistributedCoordinatorBasic:
         controller2 = CentralMPCAgent(dt=dt, horizon=5)
 
         return {
-            "drone_ids": ["drone-1", "drone-2"],
-            "xs": [
-                np.array([0, 0, 0, 0, 0, 0], dtype=float),  # position, velocity
-                np.array([5, 0, 0, 0, 0, 0], dtype=float),
+            "drones": [
+                _make_drone("drone-1", np.array([0, 0, 0, 0, 0, 0], dtype=float), np.array([0, 0, 0], dtype=float), controller1),
+                _make_drone("drone-2", np.array([5, 0, 0, 0, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), controller2),
             ],
-            "prefs": [
-                np.array([0, 0, 0], dtype=float),
-                np.array([5, 0, 0], dtype=float),
-            ],
-            "radii": [0.1, 0.1],
-            "safety_zones": [0.5, 0.5],
-            "cons_stops": [0.0, 0.0],
-            "controllers": [controller1, controller2],
             "obstacles": [],
         }
 
@@ -95,19 +116,10 @@ class TestDistributedCoordinatorConvergence:
         controller2 = CentralMPCAgent(dt=dt, horizon=5)
 
         result = coordinator.solve_controls(
-            drone_ids=["drone-1", "drone-2"],
-            xs=[
-                np.array([0, 0, 0, 1, 0, 0], dtype=float),  # Moving right
-                np.array([3, 0, 0, -1, 0, 0], dtype=float),  # Moving left
+            drones=[
+                _make_drone("drone-1", np.array([0, 0, 0, 1, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), controller1),
+                _make_drone("drone-2", np.array([3, 0, 0, -1, 0, 0], dtype=float), np.array([-2, 0, 0], dtype=float), controller2),
             ],
-            prefs=[
-                np.array([5, 0, 0], dtype=float),  # Wants to go right
-                np.array([-2, 0, 0], dtype=float),  # Wants to go left
-            ],
-            radii=[0.1, 0.1],
-            safety_zones=[0.5, 0.5],
-            cons_stops=[0.0, 0.0],
-            controllers=[controller1, controller2],
             obstacles=[],
         )
 
@@ -139,19 +151,10 @@ class TestDistributedCoordinatorCollisionAvoidance:
 
         # Drones starting close and heading toward each other
         result = coordinator.solve_controls(
-            drone_ids=["d1", "d2"],
-            xs=[
-                np.array([0, 0, 0, 0.5, 0, 0], dtype=float),  # Moving right
-                np.array([2, 0, 0, -0.5, 0, 0], dtype=float),  # Moving left
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0.5, 0, 0], dtype=float), np.array([3, 0, 0], dtype=float), controller1, safety_zone=safety_zone),
+                _make_drone("d2", np.array([2, 0, 0, -0.5, 0, 0], dtype=float), np.array([-1, 0, 0], dtype=float), controller2, safety_zone=safety_zone),
             ],
-            prefs=[
-                np.array([3, 0, 0], dtype=float),
-                np.array([-1, 0, 0], dtype=float),
-            ],
-            radii=[0.1, 0.1],
-            safety_zones=[safety_zone, safety_zone],
-            cons_stops=[0.0, 0.0],
-            controllers=[controller1, controller2],
             obstacles=[],
         )
 
@@ -159,12 +162,11 @@ class TestDistributedCoordinatorCollisionAvoidance:
         assert "d1" in result
         assert "d2" in result
 
-        # Controls should be bounded by controller limits
-        u_min, u_max = controller1.central_bounds()
-        assert np.all(result["d1"] >= u_min - 1e-6)
-        assert np.all(result["d1"] <= u_max + 1e-6)
-        assert np.all(result["d2"] >= u_min - 1e-6)
-        assert np.all(result["d2"] <= u_max + 1e-6)
+        # Controls should be bounded by default physics limits
+        assert np.all(result["d1"] >= -3.0 - 1e-6)
+        assert np.all(result["d1"] <= 3.0 + 1e-6)
+        assert np.all(result["d2"] >= -3.0 - 1e-6)
+        assert np.all(result["d2"] <= 3.0 + 1e-6)
 
 
 class TestDistributedCoordinatorWarmStart:
@@ -185,36 +187,23 @@ class TestDistributedCoordinatorWarmStart:
         controller1 = CentralMPCAgent(dt=dt, horizon=5)
         controller2 = CentralMPCAgent(dt=dt, horizon=5)
 
-        common_args = {
-            "drone_ids": ["d1", "d2"],
-            "prefs": [
-                np.array([2, 0, 0], dtype=float),
-                np.array([5, 0, 0], dtype=float),
-            ],
-            "radii": [0.1, 0.1],
-            "safety_zones": [0.5, 0.5],
-            "cons_stops": [0.0, 0.0],
-            "controllers": [controller1, controller2],
-            "obstacles": [],
-        }
-
         # First call - no warm-start
         coordinator.solve_controls(
-            xs=[
-                np.array([0, 0, 0, 0, 0, 0], dtype=float),
-                np.array([4, 0, 0, 0, 0, 0], dtype=float),
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0, 0, 0], dtype=float), np.array([2, 0, 0], dtype=float), controller1),
+                _make_drone("d2", np.array([4, 0, 0, 0, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), controller2),
             ],
-            **common_args,
+            obstacles=[],
         )
         iter1 = coordinator.get_last_iteration_count()
 
         # Second call - should use warm-start (slightly moved positions)
         coordinator.solve_controls(
-            xs=[
-                np.array([0.1, 0, 0, 0.1, 0, 0], dtype=float),
-                np.array([4.1, 0, 0, 0, 0, 0], dtype=float),
+            drones=[
+                _make_drone("d1", np.array([0.1, 0, 0, 0.1, 0, 0], dtype=float), np.array([2, 0, 0], dtype=float), controller1),
+                _make_drone("d2", np.array([4.1, 0, 0, 0, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), controller2),
             ],
-            **common_args,
+            obstacles=[],
         )
         iter2 = coordinator.get_last_iteration_count()
 
@@ -244,19 +233,10 @@ class TestDistributedCoordinatorNoCentralCost:
             pass
 
         result = coordinator.solve_controls(
-            drone_ids=["d1", "d2"],
-            xs=[
-                np.array([0, 0, 0, 0, 0, 0], dtype=float),
-                np.array([5, 0, 0, 0, 0, 0], dtype=float),
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0, 0, 0], dtype=float), np.array([0, 0, 0], dtype=float), DummyController()),
+                _make_drone("d2", np.array([5, 0, 0, 0, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), DummyController()),
             ],
-            prefs=[
-                np.array([0, 0, 0], dtype=float),
-                np.array([5, 0, 0], dtype=float),
-            ],
-            radii=[0.1, 0.1],
-            safety_zones=[0.5, 0.5],
-            cons_stops=[0.0, 0.0],
-            controllers=[DummyController(), DummyController()],
             obstacles=[],
         )
 
@@ -278,19 +258,10 @@ class TestDistributedCoordinatorNoCentralCost:
         controller_with_cost = CentralMPCAgent(dt=dt, horizon=5)
 
         result = coordinator.solve_controls(
-            drone_ids=["d1", "d2"],
-            xs=[
-                np.array([0, 0, 0, 0, 0, 0], dtype=float),
-                np.array([5, 0, 0, 0, 0, 0], dtype=float),
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0, 0, 0], dtype=float), np.array([0, 0, 0], dtype=float), controller_with_cost),
+                _make_drone("d2", np.array([5, 0, 0, 0, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), DummyController()),
             ],
-            prefs=[
-                np.array([0, 0, 0], dtype=float),
-                np.array([5, 0, 0], dtype=float),
-            ],
-            radii=[0.1, 0.1],
-            safety_zones=[0.5, 0.5],
-            cons_stops=[0.0, 0.0],
-            controllers=[controller_with_cost, DummyController()],
             obstacles=[],
         )
 
@@ -318,13 +289,9 @@ class TestDistributedCoordinatorWithObstacles:
 
         # Drone heading toward obstacle
         result = coordinator.solve_controls(
-            drone_ids=["d1"],
-            xs=[np.array([0, 0, 0, 1, 0, 0], dtype=float)],  # Moving right
-            prefs=[np.array([5, 0, 0], dtype=float)],  # Wants to go right
-            radii=[0.1],
-            safety_zones=[0.5],
-            cons_stops=[0.0],
-            controllers=[controller],
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 1, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), controller),
+            ],
             obstacles=[(np.array([2, 0, 0]), 0.5)],  # Obstacle at x=2
         )
 
@@ -351,13 +318,9 @@ class TestDistributedCoordinatorWithRoomBounds:
 
         # Drone near wall
         result = coordinator.solve_controls(
-            drone_ids=["d1"],
-            xs=[np.array([0, 0, 0, 0, 0, 0], dtype=float)],
-            prefs=[np.array([0, 0, 0], dtype=float)],
-            radii=[0.1],
-            safety_zones=[0.5],
-            cons_stops=[0.0],
-            controllers=[controller],
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0, 0, 0], dtype=float), np.array([0, 0, 0], dtype=float), controller),
+            ],
             obstacles=[],
             room_min=np.array([-5, -5, -5]),
             room_max=np.array([5, 5, 5]),
@@ -386,21 +349,11 @@ class TestDistributedCoordinatorIntegration:
         controllers = [CentralMPCAgent(dt=dt, horizon=5) for _ in range(3)]
 
         result = coordinator.solve_controls(
-            drone_ids=["d1", "d2", "d3"],
-            xs=[
-                np.array([0, 0, 0, 0, 0, 0], dtype=float),
-                np.array([3, 0, 0, 0, 0, 0], dtype=float),
-                np.array([1.5, 2, 0, 0, 0, 0], dtype=float),
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0, 0, 0], dtype=float), np.array([0, 0, 0], dtype=float), controllers[0]),
+                _make_drone("d2", np.array([3, 0, 0, 0, 0, 0], dtype=float), np.array([3, 0, 0], dtype=float), controllers[1]),
+                _make_drone("d3", np.array([1.5, 2, 0, 0, 0, 0], dtype=float), np.array([1.5, 2, 0], dtype=float), controllers[2]),
             ],
-            prefs=[
-                np.array([0, 0, 0], dtype=float),
-                np.array([3, 0, 0], dtype=float),
-                np.array([1.5, 2, 0], dtype=float),
-            ],
-            radii=[0.1, 0.1, 0.1],
-            safety_zones=[0.5, 0.5, 0.5],
-            cons_stops=[0.0, 0.0, 0.0],
-            controllers=controllers,
             obstacles=[],
         )
 
@@ -425,21 +378,11 @@ class TestDistributedCoordinatorIntegration:
 
         # Drones far apart - only some are neighbors
         result = coordinator.solve_controls(
-            drone_ids=["d1", "d2", "d3"],
-            xs=[
-                np.array([0, 0, 0, 0, 0, 0], dtype=float),
-                np.array([1.5, 0, 0, 0, 0, 0], dtype=float),  # Near d1
-                np.array([10, 0, 0, 0, 0, 0], dtype=float),  # Far from d1, d2
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0, 0, 0], dtype=float), np.array([0, 0, 0], dtype=float), controllers[0]),
+                _make_drone("d2", np.array([1.5, 0, 0, 0, 0, 0], dtype=float), np.array([1.5, 0, 0], dtype=float), controllers[1]),
+                _make_drone("d3", np.array([10, 0, 0, 0, 0, 0], dtype=float), np.array([10, 0, 0], dtype=float), controllers[2]),
             ],
-            prefs=[
-                np.array([0, 0, 0], dtype=float),
-                np.array([1.5, 0, 0], dtype=float),
-                np.array([10, 0, 0], dtype=float),
-            ],
-            radii=[0.1, 0.1, 0.1],
-            safety_zones=[0.5, 0.5, 0.5],
-            cons_stops=[0.0, 0.0, 0.0],
-            controllers=controllers,
             obstacles=[],
         )
 
@@ -464,19 +407,10 @@ class TestDistributedCoordinatorIntegration:
         # Should warn but not fail
         with pytest.warns(RuntimeWarning, match="did not converge"):
             result = coordinator.solve_controls(
-                drone_ids=["d1", "d2"],
-                xs=[
-                    np.array([0, 0, 0, 1, 0, 0], dtype=float),
-                    np.array([2, 0, 0, -1, 0, 0], dtype=float),
+                drones=[
+                    _make_drone("d1", np.array([0, 0, 0, 1, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), controllers[0]),
+                    _make_drone("d2", np.array([2, 0, 0, -1, 0, 0], dtype=float), np.array([-3, 0, 0], dtype=float), controllers[1]),
                 ],
-                prefs=[
-                    np.array([5, 0, 0], dtype=float),
-                    np.array([-3, 0, 0], dtype=float),
-                ],
-                radii=[0.1, 0.1],
-                safety_zones=[0.5, 0.5],
-                cons_stops=[0.0, 0.0],
-                controllers=controllers,
                 obstacles=[],
             )
 

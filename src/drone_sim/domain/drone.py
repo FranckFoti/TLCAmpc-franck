@@ -6,6 +6,7 @@ from typing import TypeAlias
 import numpy as np
 
 from drone_sim.controllers.base import Controller
+from drone_sim.physics.base import PhysicsModel
 
 Color: TypeAlias = str | tuple[float, float, float]
 
@@ -37,15 +38,25 @@ class Drone:
    radius: float
    safety_zone: float
    cons_stop: float
-   v_max: float
 
    color: Color
    safety_color: Color
    trace_color: Color
 
    controller: Controller
+   physics: PhysicsModel
    x: np.ndarray  # [x,y,z,vx,vy,vz]
    route: Route
+
+   @property
+   def v_max(self) -> float:
+      return self.physics.v_max()
+
+   def predict(self, u: np.ndarray) -> np.ndarray:
+      return self.physics.step(self.x, u)
+
+   def bounds(self) -> tuple[list[float], list[float]]:
+      return self.physics.central_bounds()
 
    def position(self) -> np.ndarray:
       return self.x[:3]

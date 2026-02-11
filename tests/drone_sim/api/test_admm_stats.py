@@ -36,8 +36,6 @@ def central_config() -> ScenarioConfig:
                 "horizon": 4,
                 "q_pos": [3.0, 3.0, 3.0],
                 "r_u": [0.1, 0.1, 0.1],
-                "u_min": [-3.0, -3.0, -3.0],
-                "u_max": [3.0, 3.0, 3.0],
             },
         },
         "coordinator": {

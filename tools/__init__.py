@@ -65,11 +65,11 @@ def _build_scenario(num_drones: int, horizon: int, v_max: float, u_max: float, c
 
    room = RoomConfig(min=[-2.5, -2.5, -2.5], max=[2.5, 2.5, 2.5])
 
-   physics = PhysicsSpec(type="linear_kinematics", params={})
+   physics = PhysicsSpec(id="default", type="linear_kinematics",
+                         params={"v_max": v_max, "u_min": [-u_max]*3, "u_max": [u_max]*3})
 
    controller = ControllerSpec(type="mpc_agent",
-                               params={"horizon": horizon, "q_pos": [3.0, 3.0, 3.0], "r_u": [0.1, 0.1, 0.1],
-                                       "u_min": [-3.0, -3.0, -3.0], "u_max": [3.0, 3.0, 3.0]})
+                               params={"horizon": horizon, "q_pos": [3.0, 3.0, 3.0], "r_u": [0.1, 0.1, 0.1]})
 
    if coordinator_type == "dmpc_admm":
       coordinator = ControllerSpec(type="dmpc_admm", params={"horizon": horizon, **_DMPC_ADMM_DEFAULTS})

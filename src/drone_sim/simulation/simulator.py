@@ -67,7 +67,16 @@ class Simulator:
       from drone_sim.simulation import coordinator as _coord  # noqa: F401
       from drone_sim.simulation import distributed_coordinator as _dmpc  # noqa: F401
 
-      physics = create_physics({"type": cfg.physics.type, "params": {"dt": cfg.dt, **cfg.physics.params}})
+      # Build physics lookup: supports single PhysicsSpec or list of PhysicsSpec
+      physics_specs = cfg.physics if isinstance(cfg.physics, list) else [cfg.physics]
+      physics_by_id: dict[str | None, object] = {}
+      first_physics = None
+      for ps in physics_specs:
+         phys = create_physics({"type": ps.type, "params": {"dt": cfg.dt, **ps.params}})
+         physics_by_id[ps.id] = phys
+         if first_physics is None:
+            first_physics = phys
+      physics = first_physics
 
       drones: list[Drone] = []
 
@@ -87,6 +96,9 @@ class Simulator:
          x0 = np.zeros(6, dtype=float)
          x0[:3] = start
 
+         # Resolve per-drone physics: lookup by drone's physics ID, fall back to first/global
+         drone_physics = physics_by_id.get(drone_cfg.physics, physics)
+
          route = Route(waypoints=[np.asarray(w, dtype=float) for w in drone_cfg.waypoints],
                        target=np.asarray(drone_cfg.target, dtype=float))
          drone_color = _normalize_color(drone_cfg.drone_color)
@@ -94,8 +106,9 @@ class Simulator:
          trace_color = _normalize_color(drone_cfg.trace_color or drone_cfg.drone_color)
 
          drones.append(Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone,
-                             cons_stop=drone_cfg.cons_stop, v_max=drone_cfg.v_max, color=drone_color, safety_color=safety_color,
-                             trace_color=trace_color, controller=controller, x=x0, route=route))
+                             cons_stop=drone_cfg.cons_stop, color=drone_color, safety_color=safety_color,
+                             trace_color=trace_color, controller=controller, physics=drone_physics,
+                             x=x0, route=route))
 
       obstacles = [(np.asarray(o.center, dtype=float), float(o.radius)) for o in cfg.obstacles]
 
@@ -194,22 +207,17 @@ class Simulator:
                          j in range(len(self.drones)) if j != i]
 
             if hasattr(d.controller, "control"):
-               u = d.controller.control(d.x, prefs[i], neighbors, self.obstacles, self_radius=d.radius,
-                                        self_safety_zone=d.safety_zone)
+               u = d.controller.control(d, neighbors, self.obstacles)
             else:
                u = np.zeros(3, dtype=float)
             us.append(np.asarray(u, dtype=float).reshape(3))
 
          # Then override optimized drones with coordinator outputs.
-         all_drone_state = {d.drone_id: (positions[i], velocities[i], float(d.radius)) for i, d in
-                            enumerate(self.drones)}
-
          try:
-            u_by_id = self.coordinator.solve_controls(drone_ids=[d.drone_id for d in self.drones], xs=[d.x for d in self.drones], prefs=prefs,
-                                                      radii=[d.radius for d in self.drones], safety_zones=[d.safety_zone for d in self.drones],
-                                                      cons_stops=[d.cons_stop for d in self.drones], v_maxs=[d.v_max for d in self.drones],
-                                                      controllers=[d.controller for d in self.drones],
-                                                      obstacles=self.obstacles, all_drone_state=all_drone_state, room_min=self.room_min, room_max=self.room_max)
+            u_by_id = self.coordinator.solve_controls(
+                                                      drones=self.drones,
+                                                      obstacles=self.obstacles,
+                                                      room_min=self.room_min, room_max=self.room_max)
 
          except RuntimeError as exc:
             # Mark the step as infeasible (e.g. walls/obstacles make the optimization problem infeasible) and abort this step without advancing the simulation time.
@@ -223,7 +231,8 @@ class Simulator:
 
          # Apply physics updates
          for d, u in zip(self.drones, us, strict=True):
-            d.x = self.physics.step(d.x, u)
+            d.x = d.predict(u)
+            # d.x = self.physics.step(d.x, u)
 
             # Keep the drone inside the room bounds. We clamp the position and zero the velocity component(s) that hit a wall.
             p = d.position()

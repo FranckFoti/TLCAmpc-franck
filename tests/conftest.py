@@ -29,7 +29,7 @@ def valid_config():
    """Return a valid scenario configuration dict."""
    return {
       "dt": 0.1,
-      "physics": {"type": "linear_kinematics", "params": {}},
+      "physics": {"id": "default", "type": "linear_kinematics", "params": {"v_max": 5.0, "u_min": [-3.0, -3.0, -3.0], "u_max": [3.0, 3.0, 3.0]}},
       "controller": {"type": "mpc_agent", "params": {"horizon": 5}},
       "coordinator": {"type": "mpc_central", "params": {"horizon": 5}},
       "drones": [
@@ -40,6 +40,7 @@ def valid_config():
             "target": [5.0, 5.0, 5.0],
             "radius": 0.2,
             "safety_zone": 1.0,
+            "physics": "default",
          }
       ],
       "obstacles": [],
@@ -130,11 +131,11 @@ def sample_drone(sample_controller: CentralMPCAgent, sample_route: Route) -> Dro
       radius=0.2,
       safety_zone=1.0,
       cons_stop=0.0,
-      v_max=5.0,
       color="tab:blue",
       safety_color="tab:cyan",
       trace_color="tab:blue",
       controller=sample_controller,
+      physics=LinearKinematicsPhysics(dt=0.1),
       x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float),
       route=sample_route
    )
