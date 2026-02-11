@@ -8,6 +8,7 @@ from drone_sim.domain.drone import Drone
 
 class MPCConstraints(ABC):
    """Base class for constraints."""
+
    def __init__(self, horizon: int):
       self._horizon = horizon
 
@@ -31,8 +32,7 @@ class VelocityConstraints(MPCConstraints):
       for h in range(self._horizon):
          vel = v_pred[h, :]
          v_max = drone_state.v_max
-         vel_margin = v_max ** 2 - float(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
-         result[h] = max(0, vel_margin)
+         result[h] = v_max ** 2 - float(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
       return np.concatenate([values, result])
 
    def evaluate_multi(self, drone_states: list[Drone], v_pred: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -49,8 +49,7 @@ class VelocityConstraints(MPCConstraints):
             vel = v_pred[d][h]  # (vx, vy, vz)
             v_max = drone_states[d].v_max
             # Constraint: v_max^2 - (vx^2 + vy^2 + vz^2) >= 0 (is always correct .. do not run into square root issue)
-            velocity_margin = v_max ** 2 - float(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
-            result[count] = max(0, velocity_margin)
+            result[count] = v_max ** 2 - float(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
             count += 1
       return np.concatenate([values, result])
 
@@ -72,10 +71,24 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       return np.concatenate([values, result])
 
    def evaluate_multi(self, drones: list[Drone], pred_pos: dict[str, np.ndarray], values: np.ndarray) -> np.ndarray:
-      for drone in drones:
-         neighbor_trajectories = self._get_neighbor_trajectories(drone.drone_id, drones, pred_pos)
-         result = self._evaluate(drone, pred_pos[drone.drone_id], neighbor_trajectories)
-         values = np.concatenate([values, result])
+      """ Evaluate collision avoidance for all drone pairs.
+
+      Uses i<j pairs to avoid duplicates. Includes cons_stop since all drone
+      info is available in the multi-drone case.
+      """
+      for i in range(len(drones)):
+         for j in range(i + 1, len(drones)):
+            drone_i = drones[i]
+            drone_j = drones[j]
+            traj_i = pred_pos[drone_i.drone_id]
+            traj_j = pred_pos[drone_j.drone_id]
+            min_dist = drone_i.safety_zone + drone_j.safety_zone + drone_i.cons_stop + drone_j.cons_stop
+
+            result = np.zeros(self._horizon)
+            for h in range(self._horizon):
+               dist = float(np.linalg.norm(traj_i[h] - traj_j[h]))
+               result[h] = dist - min_dist
+            values = np.concatenate([values, result])
       return values
 
    def _get_neighbor_trajectories(self, current_id: str, drones: list[Drone], pred_pos: dict[str, np.ndarray]):
@@ -142,34 +155,42 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
 
 
 class RoomConstraints(MPCConstraints):
+   def __init__(self, horizon: int, wall_tolerance: float = 0.0):
+      super().__init__(horizon)
+      self._wall_tolerance = wall_tolerance
+
    def label(self) -> str:
       return "room"
 
-   def evaluate_single(self, drone: Drone, pred_pos: np.ndarray, room_max: float, room_min: float, values: np.ndarray, room_is_sphere: bool = False) -> np.ndarray:
+   def evaluate_single(self, drone: Drone, pred_pos: np.ndarray, room_max: float, room_min: float, values: np.ndarray,
+                       room_is_sphere: bool = False) -> np.ndarray:
       """ Evaluate room boundary constraints for a single drone.
       :param drone: the drone
       :param pred_pos: predicted positions for the drone for each time step (shape: (horizon, 3))
-      :param room: the room defining the boundaries
-      :param values: combined list for all constraints, will be filled in row, this step appends room constraints for the drone
+      :param room_max: room upper bounds (3,) for box or radius for sphere
+      :param room_min: room lower bounds (3,) for box or unused for sphere
+      :param values: combined list for all constraints, will be filled in row
+      :param room_is_sphere: if True, room_max is treated as sphere radius
       :return: updated values list
       """
       result = self._evaluate(drone, pred_pos, room_max, room_min, room_is_sphere)
       return np.concatenate([values, result])
 
-   def evaluate_multi(self, drones: list[Drone], pred_pos: dict[str, np.ndarray], room_max: float, room_min: float, values: np.ndarray, room_is_sphere: bool = False) -> np.ndarray:
+   def evaluate_multi(self, drones: list[Drone], pred_pos: dict[str, np.ndarray], room_max: float, room_min: float, values: np.ndarray,
+                      room_is_sphere: bool = False) -> np.ndarray:
       """ Evaluate room boundary constraints for multiple drones.
       :param drones: list of Drones involved
       :param pred_pos: predicted positions for the drones keyed by drone_id
-      :param room: the room defining the boundaries
-      :param values: combined list for all constraints, will be filled in row, this step appends room constraints for each drone
+      :param room_max: room upper bounds (3,) for box or radius for sphere
+      :param room_min: room lower bounds (3,) for box or unused for sphere
+      :param values: combined list for all constraints, will be filled in row
+      :param room_is_sphere: if True, room_max is treated as sphere radius
       :return: updated values list
       """
-      result = np.zeros(self._horizon * len(drones))
-      count = 0
       for d in range(len(drones)):
-         result[count:count + self._horizon] = self._evaluate(drones[d], pred_pos[drones[d].drone_id], room_max, room_min, room_is_sphere)
-         count += self._horizon
-      return np.concatenate([values, result])
+         result = self._evaluate(drones[d], pred_pos[drones[d].drone_id], room_max, room_min, room_is_sphere)
+         values = np.concatenate([values, result])
+      return values
 
    def _evaluate(self, drone: Drone, pred_pos: np.ndarray, room_max: float, room_min: float, room_is_sphere: bool = False) -> np.ndarray:
       if room_is_sphere:
@@ -179,19 +200,21 @@ class RoomConstraints(MPCConstraints):
    def _evaluate_box(self, drone: Drone, pred_pos: np.ndarray, room_max: float, room_min: float) -> np.ndarray:
       min_c = np.asarray(room_min, dtype=float).reshape(3)
       max_c = np.asarray(room_max, dtype=float).reshape(3)
-      result = np.zeros(self._horizon)
+      result = np.zeros(self._horizon * 6)
+      count = 0
       for h in range(self._horizon):
          pos = pred_pos[h]
-         # Minimum margin across all 6 room faces, accounting for safety zone
-         lower_margins = pos - min_c - drone.safety_zone
-         upper_margins = max_c - pos - drone.safety_zone
-         result[h] = float(min(np.min(lower_margins), np.min(upper_margins)))
+         for d in range(3):
+            result[count] = float(pos[d] - drone.safety_zone - min_c[d]) + self._wall_tolerance
+            count += 1
+         for d in range(3):
+            result[count] = float(max_c[d] - (pos[d] + drone.safety_zone)) + self._wall_tolerance
+            count += 1
       return result
 
    def _evaluate_sphere(self, drone: Drone, pred_pos: np.ndarray, room_radius: float) -> np.ndarray:
       result = np.zeros(self._horizon)
       for h in range(self._horizon):
-         dist = float(np.linalg.norm(pred_pos[h])) # center is always (0,0,0)
+         dist = float(np.linalg.norm(pred_pos[h]))  # center is always (0,0,0)
          result[h] = room_radius - dist - drone.safety_zone
       return result
-

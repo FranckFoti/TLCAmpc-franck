@@ -325,39 +325,37 @@ class TestCentralMPCGlobalCoordinatorSolveControls:
       assert np.all(u <= 2.0 + 1e-6)
 
 
-class TestCentralMPCGlobalCoordinatorObservers:
-   """Tests for CentralMPCGlobalCoordinator observer methods."""
+class TestCentralMPCGlobalCoordinatorConstraints:
+   """Tests that constraint classes are properly integrated in the coordinator."""
 
-   def test_observe_obstacles_adds_constraints(self, sample_coordinator: CentralMPCGlobalCoordinator):
-      """Test observe_obstacles adds constraint values."""
+   def test_obstacles_constraint_via_class(self, sample_coordinator: CentralMPCGlobalCoordinator):
+      """Test obstacle constraints produce correct values via constraint classes."""
+      from drone_sim.domain.constraints import ObstacleAvoidanceConstraints
       H = sample_coordinator.horizon
       d1 = _make_drone("d1", np.zeros(6), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
-      P_opt = np.zeros((1, H, 3))  # Drone at origin
+      pred_pos = np.zeros((H, 3))
       obstacles = [(np.array([5.0, 0.0, 0.0]), 0.5)]
-      vals: list[float] = []
 
-      sample_coordinator.observe_obstacles([d1], P_opt, obstacles, vals)
+      oac = ObstacleAvoidanceConstraints(horizon=H)
+      result = oac.evaluate_single(d1, pred_pos, obstacles, np.array([]))
 
-      # Should have H constraints (one per timestep)
-      assert len(vals) == H
-      # Constraints should be positive (satisfied) since obstacle is far
-      assert all(v > 0 for v in vals)
+      assert len(result) == H
+      assert all(v > 0 for v in result)
 
-   def test_observe_no_flying_zone_adds_constraints(self, sample_coordinator: CentralMPCGlobalCoordinator):
-      """Test observe_no_flying_zone adds room boundary constraints."""
+   def test_room_constraint_via_class(self, sample_coordinator: CentralMPCGlobalCoordinator):
+      """Test room constraints produce correct per-face values via constraint classes."""
+      from drone_sim.domain.constraints import RoomConstraints
       H = sample_coordinator.horizon
       d1 = _make_drone("d1", np.zeros(6), np.zeros(3), CentralMPCAgent(dt=sample_coordinator.dt))
-      P_opt = np.zeros((1, H, 3)) + 5.0  # Drone at (5,5,5)
+      pred_pos = np.zeros((H, 3)) + 5.0
       room_min = np.array([0.0, 0.0, 0.0])
       room_max = np.array([10.0, 10.0, 10.0])
-      vals: list[float] = []
 
-      sample_coordinator.observe_no_flying_zone([d1], P_opt, room_max, room_min, vals)
+      rc = RoomConstraints(horizon=H)
+      result = rc.evaluate_single(d1, pred_pos, room_max, room_min, np.array([]))
 
-      # Should have H * 1 * 6 constraints (6 walls per drone per timestep)
-      assert len(vals) == H * 6
-      # Drone is well within room, so constraints should be satisfied
-      assert all(v >= 0 for v in vals)
+      assert len(result) == H * 6
+      assert all(v >= 0 for v in result)
 
 
 class TestCentralMPCGlobalCoordinatorEdgeCases:

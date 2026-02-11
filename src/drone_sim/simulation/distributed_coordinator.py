@@ -59,7 +59,7 @@ class DistributedMPCCoordinator:
       self._admm_state = ADMMState(rho=self.rho, primal_tol=self.primal_tol, dual_tol=self.dual_tol, horizon=self.horizon, )
 
    def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None = None,
-         room_max: np.ndarray | None = None, ) -> dict[str, np.ndarray]:
+                      room_max: np.ndarray | None = None, ) -> dict[str, np.ndarray]:
       """Solve for drone controls using distributed ADMM optimization.
       Matches the CentralMPCGlobalCoordinator interface.
 
@@ -131,7 +131,7 @@ class DistributedMPCCoordinator:
          for drone_id in opt_ids:
             i = idx_by_id[drone_id]
             self._mailbox.broadcast(sender_id=drone_id, trajectory=trajectories[drone_id], safety_zone=float(safety_zones[i]), timestamp=timestep,
-                  neighbor_graph=self._neighbor_graph, )
+                                    neighbor_graph=self._neighbor_graph, )
 
          # 4b-c. For each drone: receive neighbors, solve local MPC
          if self.gauss_seidel:
@@ -153,7 +153,7 @@ class DistributedMPCCoordinator:
 
                # Solve local MPC
                u_opt, traj_opt, success = solver.solve(drone=drones[i], neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
-                     room_max=room_max, u_prev=u_prev, )
+                                                       room_max=room_max, u_prev=u_prev, )
 
                # Immediate update (Gauss-Seidel style)
                trajectories[drone_id] = traj_opt
@@ -161,7 +161,7 @@ class DistributedMPCCoordinator:
 
                # Broadcast immediately so next drone sees updated trajectory
                self._mailbox.broadcast(sender_id=drone_id, trajectory=traj_opt, safety_zone=float(safety_zones[i]), timestamp=timestep,
-                     neighbor_graph=self._neighbor_graph, )
+                                       neighbor_graph=self._neighbor_graph, )
          else:
             # Jacobi: all drones use stale data, update all at once
             trajectories, controls = self._jacobi(drone_order, drones, local_solvers, iteration, obstacles, room_min, room_max)
@@ -205,8 +205,9 @@ class DistributedMPCCoordinator:
 
       return result
 
-   def _jacobi(self, drone_order: list[str], drones: list[Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int, obstacles: list[tuple[np.ndarray, float]] | None = None,
-                     room_min: np.ndarray | None = None, room_max: np.ndarray | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+   def _jacobi(self, drone_order: list[str], drones: list[Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
+               obstacles: list[tuple[np.ndarray, float]] | None = None, room_min: np.ndarray | None = None, room_max: np.ndarray | None = None) -> tuple[
+      dict[str, np.ndarray], dict[str, np.ndarray]]:
       # Jacobi: all drones use stale data, update all at once
       new_trajectories: dict[str, np.ndarray] = {}
       new_controls: dict[str, np.ndarray] = {}
