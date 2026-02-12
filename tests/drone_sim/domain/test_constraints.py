@@ -23,6 +23,10 @@ from drone_sim.domain.drone import Drone, Route
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 
 
+class _StubController:
+    pass
+
+
 def _make_drone(
     drone_id: str = "d1",
     x: np.ndarray | None = None,
@@ -34,10 +38,6 @@ def _make_drone(
     alpha: float | None = None,
 ) -> Drone:
     """Helper to create a minimal Drone for constraint testing."""
-
-    class _StubController:
-        pass
-
     if x is None:
         x = np.zeros(6, dtype=float)
     if target is None:
@@ -79,22 +79,6 @@ class TestVelocityConstraintsSingle:
 
         assert result.shape == (horizon,)
         assert np.all(result > 0)
-
-    @pytest.mark.skip("seems to be invalid, the clipping is done in step, not in constraints")
-    def test_above_vmax_clamped_to_zero(self):
-        """Velocity above v_max produces zero (clamped by max(0, ...))."""
-        horizon = 3
-        velocity_constraints = VelocityConstraints(horizon=horizon)
-        drone = _make_drone(v_max=2.0)
-        # speed = sqrt(27) ~ 5.2 m/s, above 2.0
-        v_pred = np.ones((horizon, 3)) * 3.0
-        values = np.array([])
-
-        result = velocity_constraints.evaluate_single(drone, v_pred, values)
-
-        assert result.shape == (horizon,)
-        # max(0, negative) = 0
-        assert np.all(result == 0.0)
 
     def test_zero_velocity_satisfied(self):
         """Zero velocity is always within limits."""
@@ -153,23 +137,6 @@ class TestVelocityConstraintsMulti:
         assert result.shape == (2 * horizon,)
         assert np.all(result > 0)
 
-    @pytest.mark.skip("seems to be invalid, the clipping is done in step, not in constraints")
-    def test_mixed_velocities(self):
-        """One drone below, one above v_max."""
-        horizon = 2
-        velocity_constraints = VelocityConstraints(horizon=horizon)
-        drones = [_make_drone("d1", v_max=5.0), _make_drone("d2", v_max=1.0)]
-        v_pred = np.ones((2, horizon, 3)) * 2.0  # speed = sqrt(12) ~ 3.46
-        values = np.array([])
-
-        result = velocity_constraints.evaluate_multi(drones, v_pred, values)
-
-        assert result.shape == (2 * horizon,)
-        # d1 (v_max=5): 25 - 12 = 13 > 0
-        assert np.all(result[:horizon] > 0)
-        # d2 (v_max=1): max(0, 1 - 12) = 0
-        assert np.all(result[horizon:] == 0.0)
-
     def test_appends_to_existing_values(self):
         """evaluate_multi concatenates to existing values."""
         horizon = 1
@@ -199,7 +166,7 @@ class TestMovingObstacleAvoidanceSingle:
         drone = _make_drone(safety_zone=0.5)
         pred_pos = np.zeros((horizon, 3))
         neighbor_traj = np.ones((horizon, 3)) * 10.0
-        neighbors = {"n1": (neighbor_traj, 0.5)}
+        neighbors = {"n1": (neighbor_traj, None)}
         values = np.array([])
 
         result = moving_avoidance.evaluate_single(drone, pred_pos, neighbors, values)
@@ -215,7 +182,7 @@ class TestMovingObstacleAvoidanceSingle:
         pred_pos = np.zeros((horizon, 3))
         # Neighbor at (0.5, 0, 0), dist=0.5, threshold=1.0+1.0=2.0 => -1.5
         neighbor_traj = np.tile(np.array([0.5, 0.0, 0.0]), (horizon, 1))
-        neighbors = {"n1": (neighbor_traj, 1.0)}
+        neighbors = {"n1": (neighbor_traj, None)}
         values = np.array([])
 
         result = moving_avoidance.evaluate_single(drone, pred_pos, neighbors, values)
@@ -242,8 +209,8 @@ class TestMovingObstacleAvoidanceSingle:
         drone = _make_drone(safety_zone=0.5)
         pred_pos = np.zeros((horizon, 3))
         neighbors = {
-            "n1": (np.ones((horizon, 3)) * 10.0, 0.5),
-            "n2": (np.ones((horizon, 3)) * 20.0, 0.5),
+            "n1": (np.ones((horizon, 3)) * 10.0, None),
+            "n2": (np.ones((horizon, 3)) * 20.0, None),
         }
         values = np.array([])
 
@@ -253,18 +220,18 @@ class TestMovingObstacleAvoidanceSingle:
         assert np.all(result > 0)
 
     def test_exact_margin_value(self):
-        """Verify exact margin: dist - (safety_zone_self + safety_zone_neighbor)."""
+        """Verify exact margin: dist - (safety_zone_self + safety_zone_self) with same-type assumption."""
         horizon = 1
         moving_avoidance = MovingObstacleAvoidanceConstraints(horizon=horizon)
         drone = _make_drone(safety_zone=0.5)
         pred_pos = np.array([[0.0, 0.0, 0.0]])
-        # Neighbor at (5, 0, 0), dist=5, threshold=0.5+0.3=0.8
-        neighbors = {"n1": (np.array([[5.0, 0.0, 0.0]]), 0.3)}
+        # Neighbor at (5, 0, 0), dist=5, threshold=0.5+0.5=1.0 (ego safety for both)
+        neighbors = {"n1": (np.array([[5.0, 0.0, 0.0]]), None)}
         values = np.array([])
 
         result = moving_avoidance.evaluate_single(drone, pred_pos, neighbors, values)
 
-        assert result[0] == pytest.approx(4.2)
+        assert result[0] == pytest.approx(4.0)
 
 
 class TestMovingObstacleAvoidanceMulti:
@@ -305,30 +272,6 @@ class TestMovingObstacleAvoidanceMulti:
         result = moving_avoidance.evaluate_multi(drones, pred_pos, values)
 
         assert np.all(result < 0)
-
-    def test_get_neighbor_trajectories(self):
-        """_get_neighbor_trajectories excludes self and includes others."""
-        horizon = 3
-        moving_avoidance = MovingObstacleAvoidanceConstraints(horizon=horizon)
-        d1 = _make_drone("d1", safety_zone=0.5)
-        d2 = _make_drone("d2", safety_zone=0.8)
-        d3 = _make_drone("d3", safety_zone=1.2)
-        drones = [d1, d2, d3]
-        pred_pos = {
-            "d1": np.zeros((horizon, 3)),
-            "d2": np.ones((horizon, 3)),
-            "d3": np.ones((horizon, 3)) * 2,
-        }
-
-        neighbors = moving_avoidance._get_neighbor_trajectories("d1", drones, pred_pos)
-
-        assert "d1" not in neighbors
-        assert "d2" in neighbors
-        assert "d3" in neighbors
-        assert_array_almost_equal(neighbors["d2"][0], pred_pos["d2"])
-        assert neighbors["d2"][1] == 0.8
-        assert neighbors["d3"][1] == 1.2
-
 
 # ---------------------------------------------------------------
 # ObstacleAvoidanceConstraints
@@ -656,6 +599,7 @@ class TestAdaptiveConstraints:
 
         At rest the adaptive radius is just radius (0.2) which is smaller than
         the fixed safety_zone (1.0), so constraint margin should be LARGER.
+        Neighbor velocity=None uses ego drone's safety_zone as fallback.
         """
         horizon = 1
         constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
@@ -667,20 +611,21 @@ class TestAdaptiveConstraints:
 
         pred_pos = np.array([[0.0, 0.0, 0.0]])
         neighbor_traj = np.array([[5.0, 0.0, 0.0]])
-        neighbors = {"n1": (neighbor_traj, 0.5)}  # neighbor sz=0.5
+        neighbors = {"n1": (neighbor_traj, None)}  # neighbor vel=None
 
-        # Fixed: dist=5.0, threshold = 1.0 + 0.5 = 1.5, margin = 3.5
+        # Fixed: dist=5.0, threshold = 1.0 + 1.0 = 2.0 (both use ego safety_zone), margin = 3.0
         result_fixed = constraints.evaluate_single(drone_fixed, pred_pos, neighbors, np.array([]))
-        assert result_fixed[0] == pytest.approx(3.5)
+        assert result_fixed[0] == pytest.approx(3.0)
 
-        # Adaptive at rest: adaptive_radius = 0.2 (just radius), threshold = 0.2 + 0.5 = 0.7, margin = 4.3
+        # Adaptive at rest: ego adaptive_radius = 0.2, neighbor vel=None => safety_zone=1.0
+        # threshold = 0.2 + 1.0 = 1.2, margin = 3.8
         pred_vel_rest = np.array([[0.0, 0.0, 0.0]])
         result_adaptive = constraints.evaluate_single(
             drone_adaptive, pred_pos, neighbors, np.array([],), pred_vel=pred_vel_rest,
         )
-        assert result_adaptive[0] == pytest.approx(4.3)
+        assert result_adaptive[0] == pytest.approx(3.8)
 
-        # Adaptive margin should be larger (smaller safety radius at rest)
+        # Adaptive margin should be larger (smaller ego safety radius at rest)
         assert result_adaptive[0] > result_fixed[0]
 
     def test_moving_obstacle_adaptive_radius_moving(self):
@@ -688,8 +633,9 @@ class TestAdaptiveConstraints:
 
         velocity=[1,0,0]: ||v||^2=1, s_stop=1/(2*3)=1/6
         adaptive_radius = 0.2 + 0.5 * (1/6) = 0.2 + 1/12 ~ 0.28333
-        threshold = adaptive_radius + neighbor_sz = 0.28333 + 0.5 = 0.78333
-        margin = 5.0 - 0.78333 = 4.21667
+        Neighbor vel=None => uses ego safety_zone=1.0
+        threshold = adaptive_radius + 1.0 = 1.28333
+        margin = 5.0 - 1.28333 = 3.71667
         """
         horizon = 1
         constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
@@ -697,13 +643,13 @@ class TestAdaptiveConstraints:
 
         pred_pos = np.array([[0.0, 0.0, 0.0]])
         neighbor_traj = np.array([[5.0, 0.0, 0.0]])
-        neighbors = {"n1": (neighbor_traj, 0.5)}
+        neighbors = {"n1": (neighbor_traj, None)}
 
         pred_vel = np.array([[1.0, 0.0, 0.0]])
         result = constraints.evaluate_single(drone, pred_pos, neighbors, np.array([]), pred_vel=pred_vel)
 
         expected_adaptive_radius = 0.2 + 0.5 * (1.0 / (2.0 * 3.0))  # ~ 0.28333
-        expected_margin = 5.0 - (expected_adaptive_radius + 0.5)
+        expected_margin = 5.0 - (expected_adaptive_radius + 1.0)  # neighbor uses ego safety_zone
         assert result[0] == pytest.approx(expected_margin)
 
     def test_moving_obstacle_multi_adaptive_both_drones(self):
@@ -823,13 +769,14 @@ class TestAdaptiveConstraints:
         """Pass pred_vel=None explicitly, verify identical result to omitting pred_vel entirely.
 
         Both should use fixed safety_zone since pred_vel is None.
+        Neighbor vel=None also uses ego safety_zone.
         """
         horizon = 2
         constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
         drone = _make_drone(safety_zone=0.5, alpha=0.5)  # adaptive, but no velocity given
         pred_pos = np.zeros((horizon, 3))
         neighbor_traj = np.ones((horizon, 3)) * 10.0
-        neighbors = {"n1": (neighbor_traj, 0.5)}
+        neighbors = {"n1": (neighbor_traj, None)}
 
         # Without pred_vel (default None)
         result_default = constraints.evaluate_single(drone, pred_pos, neighbors, np.array([]))
@@ -840,7 +787,7 @@ class TestAdaptiveConstraints:
 
         assert_array_almost_equal(result_default, result_explicit_none)
 
-        # Should use fixed safety_zone (0.5) not adaptive radius
+        # Should use fixed safety_zone (0.5) for both ego and neighbor
         # dist = sqrt(3*100) ~ 17.32, threshold = 0.5 + 0.5 = 1.0, margin ~ 16.32
         expected_margin = np.linalg.norm(np.ones(3) * 10.0) - (0.5 + 0.5)
         for step in range(horizon):
@@ -865,3 +812,75 @@ class TestMPCConstraintsBase:
 
     def test_room_label(self):
         assert RoomConstraints(horizon=1).label() == "room"
+
+
+# ---------------------------------------------------------------
+# Per-step neighbor safety radii (ndarray support)
+# ---------------------------------------------------------------
+
+class TestPerStepNeighborVelocity:
+    """Tests for per-step neighbor velocity in _evaluate."""
+
+    def test_evaluate_single_per_step_neighbor_velocity(self):
+        """Verify _evaluate uses per-step neighbor velocity to compute adaptive radii.
+
+        Set up per-step neighbor velocities that vary across the horizon and verify
+        the constraint margin changes accordingly. Ego drone is adaptive with alpha=0.5.
+
+        horizon=3, drone at origin, neighbor at (5,0,0) at all steps.
+        ego pred_vel=None => uses safety_zone=1.0.
+        Neighbor velocities: [0,0,0], [1,0,0], [3,0,0] per step.
+        Neighbor radii computed using ego drone's params (alpha=0.5, radius=0.2, u_max=3.0):
+          step 0: vel=[0,0,0] => s_stop=0, r=0.2
+          step 1: vel=[1,0,0] => ||v||^2=1, s_stop=1/6, r=0.2+0.5*(1/6) ~ 0.2833
+          step 2: vel=[3,0,0] => ||v||^2=9, s_stop=9/6=1.5, r=0.2+0.5*1.5=0.95
+        Expected margins:
+          5.0 - (1.0 + 0.2) = 3.8,
+          5.0 - (1.0 + 0.2833) ~ 3.7167,
+          5.0 - (1.0 + 0.95) = 3.05
+        """
+        horizon = 3
+        constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
+        drone = _make_drone(safety_zone=1.0, alpha=0.5)
+        pred_pos = np.zeros((horizon, 3))
+        neighbor_traj = np.tile(np.array([5.0, 0.0, 0.0]), (horizon, 1))
+        neighbor_vel = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+        neighbors = {"n1": (neighbor_traj, neighbor_vel)}
+
+        result = constraints.evaluate_single(drone, pred_pos, neighbors, np.array([]))
+
+        assert result.shape == (horizon,)
+        r0 = 0.2
+        r1 = 0.2 + 0.5 * (1.0 / 6.0)
+        r2 = 0.2 + 0.5 * (9.0 / 6.0)
+        assert result[0] == pytest.approx(5.0 - (1.0 + r0))
+        assert result[1] == pytest.approx(5.0 - (1.0 + r1))
+        assert result[2] == pytest.approx(5.0 - (1.0 + r2))
+
+    def test_evaluate_single_none_vs_zero_velocity(self):
+        """None neighbor velocity (fixed fallback) vs zero velocity (adaptive at rest).
+
+        For a fixed drone (alpha=None): None vel => safety_zone=0.5
+        For an adaptive drone (alpha=0.5): zero vel => radius=0.2
+        """
+        horizon = 2
+        constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
+        pred_pos = np.zeros((horizon, 3))
+        neighbor_traj = np.tile(np.array([5.0, 0.0, 0.0]), (horizon, 1))
+
+        # Fixed drone: neighbor vel=None => neighbor uses ego safety_zone=0.5
+        drone_fixed = _make_drone(safety_zone=0.5)
+        neighbors_none = {"n1": (neighbor_traj, None)}
+        result_none = constraints.evaluate_single(drone_fixed, pred_pos, neighbors_none, np.array([]))
+
+        # Adaptive drone with neighbor zero vel:
+        # ego pred_vel=None => ego uses safety_zone=0.5
+        # neighbor zero vel => _safety_radius(ego_drone, [0,0,0]) => adaptive radius=0.2
+        drone_adaptive = _make_drone(safety_zone=0.5, alpha=0.5)
+        neighbors_zero = {"n1": (neighbor_traj, np.zeros((horizon, 3)))}
+        result_zero = constraints.evaluate_single(drone_adaptive, pred_pos, neighbors_zero, np.array([]))
+
+        # None => both sides use safety_zone(0.5), margin = 5.0 - 1.0 = 4.0
+        assert result_none[0] == pytest.approx(4.0)
+        # Zero vel => ego safety_zone(0.5) + neighbor adaptive(0.2) = 0.7, margin = 4.3
+        assert result_zero[0] == pytest.approx(4.3)

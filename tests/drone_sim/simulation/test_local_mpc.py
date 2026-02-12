@@ -82,7 +82,7 @@ class TestLocalMPCSolver:
 
         u_opt, traj_opt, success = solver.solve(
             drone=drone,
-            neighbor_trajectories={"neighbor-1": (neighbor_traj, 1.0)},
+            neighbor_trajectories={"neighbor-1": (neighbor_traj, None)},
         )
 
         assert u_opt.shape == (5, 3)
@@ -324,7 +324,7 @@ class TestLocalMPCSolverAdaptive:
 
         u_opt, traj_opt, success = solver.solve(
             drone=drone,
-            neighbor_trajectories={"neighbor-1": (neighbor_traj, 1.0)},
+            neighbor_trajectories={"neighbor-1": (neighbor_traj, None)},
         )
 
         assert u_opt.shape == (5, 3)

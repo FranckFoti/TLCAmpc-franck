@@ -15,7 +15,7 @@ class TrajectoryMessage:
 
     drone_id: str
     trajectory: np.ndarray  # (H, 3) predicted positions
-    safety_zone: float
+    predicted_velocities: np.ndarray | None  # (H, 3) predicted velocities, or None
     timestamp: int  # Simulation timestep when message was created
 
 
@@ -34,7 +34,7 @@ class TrajectoryMailbox:
         self,
         sender_id: str,
         trajectory: np.ndarray,
-        safety_zone: float,
+        predicted_velocities: np.ndarray | None,
         timestamp: int,
         neighbor_graph: NeighborGraph,
     ) -> None:
@@ -42,15 +42,17 @@ class TrajectoryMailbox:
 
         :param sender_id: ID of the sending drone
         :param trajectory: Predicted positions (H, 3)
-        :param safety_zone: Sender's safety zone radius
+        :param predicted_velocities: Predicted velocities (H, 3), or None
         :param timestamp: Simulation timestep when message was created
         :param neighbor_graph: NeighborGraph for determining recipients
         """
         trajectory = np.asarray(trajectory, dtype=float)
+        if predicted_velocities is not None:
+            predicted_velocities = np.asarray(predicted_velocities, dtype=float)
         message = TrajectoryMessage(
             drone_id=sender_id,
             trajectory=trajectory,
-            safety_zone=safety_zone,
+            predicted_velocities=predicted_velocities,
             timestamp=timestamp,
         )
 
@@ -72,10 +74,3 @@ class TrajectoryMailbox:
         """
         self._inbox.clear()
 
-    def clear_drone(self, drone_id: str) -> None:
-        """Clear inbox for a specific drone.
-
-        :param drone_id: ID of the drone whose inbox to clear
-        """
-        if drone_id in self._inbox:
-            del self._inbox[drone_id]

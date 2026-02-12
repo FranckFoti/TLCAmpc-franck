@@ -175,72 +175,6 @@ class TestADMMStateLambdaUpdate:
         assert np.linalg.norm(lam2) > np.linalg.norm(lam1)
 
 
-class TestADMMStateConsensusTerm:
-    """Tests for consensus term computation."""
-
-    @pytest.fixture
-    def setup_state(self):
-        """ADMMState with neighbor graph and initialized pair."""
-        state = ADMMState(horizon=5, rho=1.0)
-        graph = NeighborGraph(comm_radius=None)
-        positions = {
-            "drone-1": np.array([0, 0, 0]),
-            "drone-2": np.array([5, 0, 0]),
-        }
-        graph.update(positions)
-        state.initialize(graph.get_neighbor_pairs())
-        return state, graph
-
-    def test_get_consensus_term_returns_correct_shape(self, setup_state):
-        """get_consensus_term() returns correct shape (H, 3)."""
-        state, graph = setup_state
-        trajectories = {
-            "drone-1": np.zeros((5, 3)),
-            "drone-2": np.ones((5, 3)) * 5,
-        }
-
-        term = state.get_consensus_term("drone-1", trajectories, graph)
-        assert term.shape == (5, 3)
-
-    def test_consensus_term_zero_when_satisfied_and_lambda_zero(self, setup_state):
-        """Consensus term is zero when constraints satisfied and lambda=0."""
-        state, graph = setup_state
-
-        # Trajectories match z (which is zero initially)
-        # p_i - p_j = z means residual is zero
-        # lambda = 0 initially
-        trajectories = {
-            "drone-1": np.zeros((5, 3)),
-            "drone-2": np.zeros((5, 3)),
-        }
-
-        term = state.get_consensus_term("drone-1", trajectories, graph)
-        assert np.allclose(term, 0.0)
-
-    def test_consensus_term_pushes_away_when_violated(self, setup_state):
-        """Consensus term pushes drone away when constraint violated."""
-        state, graph = setup_state
-
-        # Drones too close - violation
-        traj1 = np.array([[0, 0, 0]] * 5, dtype=float)
-        traj2 = np.array([[0.5, 0, 0]] * 5, dtype=float)
-        trajectories = {"drone-1": traj1, "drone-2": traj2}
-
-        # Update z (will project to min_dist)
-        state.update_z(("drone-1", "drone-2"), traj1, traj2, min_dist=2.0)
-        state.update_lambda(("drone-1", "drone-2"), traj1, traj2)
-
-        term1 = state.get_consensus_term("drone-1", trajectories, graph)
-        term2 = state.get_consensus_term("drone-2", trajectories, graph)
-
-        # Terms should push drones apart (opposite directions)
-        # Since drone-1 is at x=0 and drone-2 at x=0.5, term1 should push negative
-        # and term2 should push positive to increase separation
-        assert term1[0, 0] != 0  # Non-zero consensus term
-        # Signs should be opposite
-        assert np.sign(term1[0, 0]) != np.sign(term2[0, 0])
-
-
 class TestADMMStateResiduals:
     """Tests for residual computation."""
 
@@ -399,7 +333,7 @@ class TestADMMStateIntegration:
             assert norm >= min_dist - 1e-6
 
     def test_two_drones_converging_to_collision_free(self):
-        """Two drones with ADMM consensus terms converging toward safe separation."""
+        """Two drones with ADMM z/lambda updates converging toward safe separation."""
         state = ADMMState(horizon=3, rho=0.5, primal_tol=0.1, dual_tol=0.1)
         graph = NeighborGraph(comm_radius=None)
 
@@ -421,16 +355,6 @@ class TestADMMStateIntegration:
 
             # lambda-update
             state.update_lambda(("d1", "d2"), trajectories["d1"], trajectories["d2"])
-
-            # Get consensus terms (in real ADMM this would affect local MPC)
-            term1 = state.get_consensus_term("d1", trajectories, graph)
-            term2 = state.get_consensus_term("d2", trajectories, graph)
-
-            # Terms should push drones apart
-            # d1 should be pushed negative (away from d2 which is at +x)
-            # d2 should be pushed positive (away from d1 which is at origin)
-            assert term1.shape == (3, 3)
-            assert term2.shape == (3, 3)
 
         # z should enforce minimum distance
         z = state.get_z(("d1", "d2"))

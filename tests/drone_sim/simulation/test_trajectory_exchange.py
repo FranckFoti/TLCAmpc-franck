@@ -17,17 +17,30 @@ class TestTrajectoryMessage:
     def test_message_creation(self):
         """Test TrajectoryMessage creation with required fields."""
         trajectory = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        velocities = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
         msg = TrajectoryMessage(
             drone_id="drone-1",
             trajectory=trajectory,
-            safety_zone=1.5,
+            predicted_velocities=velocities,
             timestamp=42,
         )
 
         assert msg.drone_id == "drone-1"
         np.testing.assert_array_equal(msg.trajectory, trajectory)
-        assert msg.safety_zone == 1.5
+        np.testing.assert_array_equal(msg.predicted_velocities, velocities)
         assert msg.timestamp == 42
+
+    def test_message_creation_none_velocities(self):
+        """Test TrajectoryMessage creation with None velocities."""
+        trajectory = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        msg = TrajectoryMessage(
+            drone_id="drone-1",
+            trajectory=trajectory,
+            predicted_velocities=None,
+            timestamp=42,
+        )
+
+        assert msg.predicted_velocities is None
 
     def test_message_field_access(self):
         """Test accessing all fields of TrajectoryMessage."""
@@ -35,14 +48,14 @@ class TestTrajectoryMessage:
         msg = TrajectoryMessage(
             drone_id="test-drone",
             trajectory=trajectory,
-            safety_zone=0.5,
+            predicted_velocities=np.zeros((5, 3)),
             timestamp=100,
         )
 
         # Verify all fields are accessible
         assert isinstance(msg.drone_id, str)
         assert isinstance(msg.trajectory, np.ndarray)
-        assert isinstance(msg.safety_zone, float)
+        assert isinstance(msg.predicted_velocities, np.ndarray)
         assert isinstance(msg.timestamp, int)
 
 
@@ -76,7 +89,7 @@ class TestTrajectoryMailbox:
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory,
-            safety_zone=1.0,
+            predicted_velocities=None,
             timestamp=0,
             neighbor_graph=neighbor_graph,
         )
@@ -95,11 +108,12 @@ class TestTrajectoryMailbox:
     ):
         """Test receive returns correct messages."""
         trajectory = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        velocities = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
 
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory,
-            safety_zone=1.5,
+            predicted_velocities=velocities,
             timestamp=10,
             neighbor_graph=neighbor_graph,
         )
@@ -111,7 +125,7 @@ class TestTrajectoryMailbox:
         msg = msgs["drone-1"]
         assert msg.drone_id == "drone-1"
         np.testing.assert_array_equal(msg.trajectory, trajectory)
-        assert msg.safety_zone == 1.5
+        np.testing.assert_array_equal(msg.predicted_velocities, velocities)
         assert msg.timestamp == 10
 
     def test_receive_returns_empty_dict_for_unknown_drone(
@@ -131,7 +145,7 @@ class TestTrajectoryMailbox:
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory,
-            safety_zone=1.0,
+            predicted_velocities=None,
             timestamp=0,
             neighbor_graph=neighbor_graph,
         )
@@ -139,7 +153,7 @@ class TestTrajectoryMailbox:
         mailbox.broadcast(
             sender_id="drone-2",
             trajectory=trajectory,
-            safety_zone=1.0,
+            predicted_velocities=None,
             timestamp=0,
             neighbor_graph=neighbor_graph,
         )
@@ -156,36 +170,6 @@ class TestTrajectoryMailbox:
         assert mailbox.receive("drone-2") == {}
         assert mailbox.receive("drone-3") == {}
 
-    def test_clear_drone_removes_messages_for_specific_drone(
-        self, mailbox: TrajectoryMailbox, neighbor_graph: NeighborGraph
-    ):
-        """Test clear_drone removes messages for specific drone only."""
-        trajectory = np.zeros((5, 3))
-
-        mailbox.broadcast(
-            sender_id="drone-1",
-            trajectory=trajectory,
-            safety_zone=1.0,
-            timestamp=0,
-            neighbor_graph=neighbor_graph,
-        )
-
-        # Verify drone-2 has messages
-        assert len(mailbox.receive("drone-2")) > 0
-        assert len(mailbox.receive("drone-3")) > 0
-
-        # Clear only drone-2's inbox
-        mailbox.clear_drone("drone-2")
-
-        # Verify only drone-2's inbox is empty
-        assert mailbox.receive("drone-2") == {}
-        assert len(mailbox.receive("drone-3")) > 0
-
-    def test_clear_drone_handles_unknown_drone(self, mailbox: TrajectoryMailbox):
-        """Test clear_drone handles unknown drone gracefully."""
-        # Should not raise any exception
-        mailbox.clear_drone("unknown-drone")
-
     def test_multiple_drones_broadcasting_simultaneously(
         self, mailbox: TrajectoryMailbox, neighbor_graph: NeighborGraph
     ):
@@ -196,15 +180,16 @@ class TestTrajectoryMailbox:
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory1,
-            safety_zone=1.0,
+            predicted_velocities=None,
             timestamp=0,
             neighbor_graph=neighbor_graph,
         )
 
+        velocities2 = np.ones((2, 3)) * 0.5
         mailbox.broadcast(
             sender_id="drone-2",
             trajectory=trajectory2,
-            safety_zone=1.5,
+            predicted_velocities=velocities2,
             timestamp=0,
             neighbor_graph=neighbor_graph,
         )
@@ -218,27 +203,29 @@ class TestTrajectoryMailbox:
         np.testing.assert_array_equal(msgs_drone3["drone-1"].trajectory, trajectory1)
         np.testing.assert_array_equal(msgs_drone3["drone-2"].trajectory, trajectory2)
 
-        # Verify safety zones are distinct
-        assert msgs_drone3["drone-1"].safety_zone == 1.0
-        assert msgs_drone3["drone-2"].safety_zone == 1.5
+        # Verify predicted_velocities are distinct
+        assert msgs_drone3["drone-1"].predicted_velocities is None
+        np.testing.assert_array_equal(msgs_drone3["drone-2"].predicted_velocities, velocities2)
 
     def test_integration_broadcast_receive_cycle(
         self, mailbox: TrajectoryMailbox, neighbor_graph: NeighborGraph
     ):
         """Integration test: full broadcast and receive cycle with NeighborGraph."""
+        drone_ids = ["drone-1", "drone-2", "drone-3", "drone-4"]
+
         # All drones broadcast their trajectories
-        for drone_id in neighbor_graph.get_all_drone_ids():
+        for drone_id in drone_ids:
             trajectory = np.random.randn(5, 3)
             mailbox.broadcast(
                 sender_id=drone_id,
                 trajectory=trajectory,
-                safety_zone=1.0,
+                predicted_velocities=None,
                 timestamp=0,
                 neighbor_graph=neighbor_graph,
             )
 
         # Each drone receives messages from its neighbors
-        for drone_id in neighbor_graph.get_all_drone_ids():
+        for drone_id in drone_ids:
             neighbors = neighbor_graph.get_neighbors(drone_id)
             msgs = mailbox.receive(drone_id)
 
@@ -259,7 +246,7 @@ class TestTrajectoryMailbox:
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory,
-            safety_zone=1.0,
+            predicted_velocities=None,
             timestamp=0,
             neighbor_graph=neighbor_graph,
         )
@@ -292,7 +279,7 @@ class TestTrajectoryMailbox:
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory,
-            safety_zone=1.0,
+            predicted_velocities=None,
             timestamp=0,
             neighbor_graph=graph,
         )
@@ -311,15 +298,16 @@ class TestTrajectoryMailbox:
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory1,
-            safety_zone=1.0,
+            predicted_velocities=None,
             timestamp=0,
             neighbor_graph=neighbor_graph,
         )
 
+        velocities2 = np.ones((5, 3)) * 0.5
         mailbox.broadcast(
             sender_id="drone-1",
             trajectory=trajectory2,
-            safety_zone=2.0,
+            predicted_velocities=velocities2,
             timestamp=1,
             neighbor_graph=neighbor_graph,
         )
@@ -327,5 +315,5 @@ class TestTrajectoryMailbox:
         msgs = mailbox.receive("drone-2")
         assert len(msgs) == 1  # Only one message from drone-1
         np.testing.assert_array_equal(msgs["drone-1"].trajectory, trajectory2)
-        assert msgs["drone-1"].safety_zone == 2.0
+        np.testing.assert_array_equal(msgs["drone-1"].predicted_velocities, velocities2)
         assert msgs["drone-1"].timestamp == 1

@@ -6,17 +6,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from drone_sim.domain.drone import Drone
+from drone_sim.domain.drone import Drone, has_central_cost
 from drone_sim.domain.registry import register_coordinator
 from drone_sim.simulation.distributed.admm_state import ADMMState
-from drone_sim.simulation.distributed.local_mpc import LocalMPCSolver
+from drone_sim.simulation.distributed.local_mpc import LocalMPCSolver, _pad_or_trim_horizon
 from drone_sim.simulation.distributed.neighbor_graph import NeighborGraph
 from drone_sim.simulation.distributed.trajectory_exchange import TrajectoryMailbox
-
-
-def _has_central_cost(ctrl: object) -> bool:
-   """Check if controller implements the central_cost interface."""
-   return all(hasattr(ctrl, name) for name in ("central_cost", "central_initial_guess", "horizon"))
 
 
 @register_coordinator("dmpc_admm")
@@ -69,14 +64,14 @@ class DistributedMPCCoordinator:
       :return: Dict mapping drone_id to control (3,) for first timestep
       """
       # Identify which drones to optimize (must have central_cost interface)
-      opt_drones = [d for d in drones if _has_central_cost(d.controller)]
+      opt_drones = [d for d in drones if has_central_cost(d.controller)]
 
       if not opt_drones:
          return {}
 
       opt_ids = [d.drone_id for d in opt_drones]
       drone_by_id = {d.drone_id: d for d in opt_drones}
-      safety_by_id = {d.drone_id: float(d.safety_zone) for d in drones}
+      all_drones_by_id = {d.drone_id: d for d in drones}
 
       # 1. Update neighbor graph from current positions
       positions = {d.drone_id: np.asarray(d.x, dtype=float)[:3] for d in drones}
@@ -94,7 +89,7 @@ class DistributedMPCCoordinator:
             pos = np.asarray(drone.x, dtype=float)[:3]
             trajectories[drone.drone_id] = np.tile(pos, (self.horizon, 1))
 
-      # 4. ADMM iteration loop
+      # 3. ADMM iteration loop
       converged = False
 
       # Track controls across iterations for final output
@@ -109,15 +104,16 @@ class DistributedMPCCoordinator:
                random.shuffle(drone_order)
             else:
                # Later iterations: priority-based ordering (most constrained first)
-               drone_order.sort(key=lambda d: self._compute_priority(d, trajectories, safety_by_id))
+               drone_order.sort(key=lambda d: self._compute_priority(d, trajectories, all_drones_by_id))
 
-         # 4a. Broadcast current trajectories via mailbox (initial state)
+         # 3a. Broadcast current trajectories via mailbox (initial state)
          self._mailbox.clear()
          for drone_id in opt_ids:
-            self._mailbox.broadcast(sender_id=drone_id, trajectory=trajectories[drone_id], safety_zone=safety_by_id[drone_id], timestamp=0,
+            self._mailbox.broadcast(sender_id=drone_id, trajectory=trajectories[drone_id],
+                                    predicted_velocities=None, timestamp=0,
                                     neighbor_graph=self._neighbor_graph)
 
-         # 4b-c. For each drone: receive neighbors, solve local MPC
+         # 3b. For each drone: receive neighbors, solve local MPC
          if self.gauss_seidel:
             # Gauss-Seidel: immediate updates after each drone solves
             for drone_id in drone_order:
@@ -127,40 +123,50 @@ class DistributedMPCCoordinator:
                # Get neighbor trajectories from mailbox (includes any updates)
                messages = self._mailbox.receive(drone_id)
                neighbor_trajectories = {
-                  sid: (msg.trajectory, msg.safety_zone)
+                  sid: (msg.trajectory, msg.predicted_velocities)
                   for sid, msg in messages.items()
                }
 
                # Get warm-start from previous timestep (only on first ADMM iteration)
                u_prev = None
                if drone_id in self._u_prev and iteration == 0:
-                  u_prev = np.concatenate([self._u_prev[drone_id][1:], self._u_prev[drone_id][-1:]], axis=0)
+                  u_prev = self._u_prev[drone_id]
 
                u_opt, traj_opt, success = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
                                                        room_max=room_max, u_prev=u_prev)
+
+               # Compute predicted velocities for broadcast
+               _, vel_opt = solver._predict_states(drone, u_opt)
 
                # Immediate update (Gauss-Seidel style)
                trajectories[drone_id] = traj_opt
                controls[drone_id] = u_opt
 
                # Broadcast immediately so next drone sees updated trajectory
-               self._mailbox.broadcast(sender_id=drone_id, trajectory=traj_opt, safety_zone=safety_by_id[drone_id], timestamp=0,
+               self._mailbox.broadcast(sender_id=drone_id, trajectory=traj_opt,
+                                       predicted_velocities=vel_opt, timestamp=0,
                                        neighbor_graph=self._neighbor_graph)
          else:
             # Jacobi: all drones use stale data, update all at once
             trajectories, controls = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max)
 
-         # 4d-e. Update z and lambda for all neighbor pairs
+         # 3c. Update z and lambda for all neighbor pairs
          for pair in neighbor_pairs:
             id_i, id_j = pair
             traj_i = trajectories[id_i]
             traj_j = trajectories[id_j]
-            min_dist = safety_by_id[id_i] + safety_by_id[id_j]
+
+            # Get velocities from broadcast messages
+            vel_i = self._get_velocity_from_messages(id_i, id_j)
+            vel_j = self._get_velocity_from_messages(id_j, id_i)
+            radii_i = self._compute_safety_radii(all_drones_by_id[id_i], vel_i)
+            radii_j = self._compute_safety_radii(all_drones_by_id[id_j], vel_j)
+            min_dist = radii_i + radii_j
 
             self._admm_state.update_z(pair, traj_i, traj_j, min_dist)
             self._admm_state.update_lambda(pair, traj_i, traj_j)
 
-         # 4f. Check convergence
+         # 3d. Check convergence
          if self._admm_state.is_converged(trajectories):
             converged = True
             break
@@ -179,8 +185,7 @@ class DistributedMPCCoordinator:
          warnings.warn(f"DistributedMPCCoordinator did not converge after {self.max_admm_iter} "
                        f"iterations (primal/dual residuals may exceed tolerance)", RuntimeWarning, stacklevel=2, )
 
-      # 5. Extract first-step controls from final trajectories
-      # and 6. Store trajectories for warm-start
+      # 4. Extract first-step controls and store for warm-start
       result: dict[str, np.ndarray] = {}
       for drone_id in opt_ids:
          u_seq = controls[drone_id]
@@ -202,14 +207,14 @@ class DistributedMPCCoordinator:
 
          messages = self._mailbox.receive(drone_id)
          neighbor_trajectories = {
-            sid: (msg.trajectory, msg.safety_zone)
+            sid: (msg.trajectory, msg.predicted_velocities)
             for sid, msg in messages.items()
          }
 
          # Get warm-start from previous timestep (only on first ADMM iteration)
          u_prev = None
          if drone_id in self._u_prev and iteration == 0:
-            u_prev = np.concatenate([self._u_prev[drone_id][1:], self._u_prev[drone_id][-1:]], axis=0)
+            u_prev = self._u_prev[drone_id]
 
          u_opt, traj_opt, success = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
                                                  room_max=room_max, u_prev=u_prev)
@@ -217,16 +222,25 @@ class DistributedMPCCoordinator:
          new_trajectories[drone_id] = traj_opt
          new_controls[drone_id] = u_opt
 
+      # Broadcast updated trajectories with velocities
+      for drone_id in drone_order:
+         drone = drone_by_id[drone_id]
+         solver = local_solvers[drone_id]
+         _, vel_opt = solver._predict_states(drone, new_controls[drone_id])
+         self._mailbox.broadcast(sender_id=drone_id, trajectory=new_trajectories[drone_id],
+                                 predicted_velocities=vel_opt, timestamp=0,
+                                 neighbor_graph=self._neighbor_graph)
+
       return new_trajectories, new_controls
 
    def init_trajectories(self, drones: list[Drone]) -> tuple[dict[str, np.ndarray], dict[str, LocalMPCSolver]]:
-      # 3. Initialize trajectories (use warm-start if available)
+      # Initialize trajectories (use warm-start if available)
       trajectories: dict[str, np.ndarray] = {}
       local_solvers: dict[str, LocalMPCSolver] = {}
 
       for drone in drones:
          controller = drone.controller
-         if not _has_central_cost(controller):
+         if not has_central_cost(controller):
             continue
 
          # Create local solver for this drone with bounds from physics
@@ -239,14 +253,7 @@ class DistributedMPCCoordinator:
             u0 = np.concatenate([u_prev[1:], u_prev[-1:]], axis=0)
          else:
             # Get initial guess from controller
-            u0 = controller.central_initial_guess(drone)
-            u0 = np.asarray(u0, dtype=float).reshape((-1, 3))
-            # Pad/trim to horizon
-            if u0.shape[0] < self.horizon:
-               pad = np.tile(u0[-1:], (self.horizon - u0.shape[0], 1))
-               u0 = np.concatenate([u0, pad], axis=0)
-            elif u0.shape[0] > self.horizon:
-               u0 = u0[: self.horizon]
+            u0 = _pad_or_trim_horizon(controller.central_initial_guess(drone), self.horizon)
 
          # Predict trajectory from controls
          trajectories[drone.drone_id] = local_solvers[drone.drone_id]._predict_states(drone, u0)[0]
@@ -271,7 +278,7 @@ class DistributedMPCCoordinator:
       """Get current neighbor pairs for visualization."""
       return self._neighbor_graph.get_neighbor_pairs()
 
-   def _compute_priority(self, drone_id: str, trajectories: dict[str, np.ndarray], safety_by_id: dict[str, float], ) -> float:
+   def _compute_priority(self, drone_id: str, trajectories: dict[str, np.ndarray], all_drones_by_id: dict[str, Drone]) -> float:
       """Compute priority score - lower = higher priority (solve first).
 
       Drones with smaller safety margins to neighbors get higher priority.
@@ -280,7 +287,7 @@ class DistributedMPCCoordinator:
 
       :param drone_id: ID of the drone
       :param trajectories: Current trajectories for all drones
-      :param safety_by_id: Safety zones by drone ID
+      :param all_drones_by_id: All drones by ID for safety radius computation
       :return: Priority score (lower = higher priority = solve first)
       """
       neighbors = self._neighbor_graph.get_neighbors(drone_id)
@@ -292,12 +299,42 @@ class DistributedMPCCoordinator:
       if traj_i is None:
          return float("inf")
 
+      # Get drone_id's velocity from any neighbor's inbox
+      any_neighbor = next(iter(neighbors))
+      vel_i = self._get_velocity_from_messages(drone_id, any_neighbor)
+      radii_i = self._compute_safety_radii(all_drones_by_id[drone_id], vel_i)
+
       for neighbor_id in neighbors:
          traj_j = trajectories.get(neighbor_id)
          if traj_j is None:
             continue
-         min_dist = safety_by_id[drone_id] + safety_by_id[neighbor_id]
+         vel_j = self._get_velocity_from_messages(neighbor_id, drone_id)
+         radii_j = self._compute_safety_radii(all_drones_by_id[neighbor_id], vel_j)
+         min_dist = float(np.mean(radii_i) + np.mean(radii_j))
          dists = np.linalg.norm(traj_i - traj_j, axis=1)
          min_margin = min(min_margin, float(np.min(dists)) - min_dist)
 
       return min_margin  # Smaller margin = higher priority
+
+   def _compute_safety_radii(self, drone: Drone, velocities: np.ndarray | None) -> np.ndarray:
+      """Compute per-step safety radii for a drone.
+
+      :param drone: the drone
+      :param velocities: predicted velocities (H, 3), or None
+      :return: per-step safety radii (H,)
+      """
+      if velocities is not None and drone.is_adaptive:
+         return np.array([drone.compute_adaptive_radius(velocities[step])
+                          for step in range(self.horizon)])
+      return np.full(self.horizon, drone.safety_zone)
+
+   def _get_velocity_from_messages(self, sender_id: str, any_receiver_id: str) -> np.ndarray | None:
+      """Get a drone's predicted velocities from its broadcast messages.
+
+      :param sender_id: the drone whose velocities we want
+      :param any_receiver_id: any neighbor of the sender to look up the message
+      :return: predicted velocities (H, 3) or None
+      """
+      msgs = self._mailbox.receive(any_receiver_id)
+      msg = msgs.get(sender_id)
+      return msg.predicted_velocities if msg is not None else None

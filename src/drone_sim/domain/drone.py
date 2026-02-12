@@ -11,6 +11,11 @@ from drone_sim.physics.base import PhysicsModel
 Color: TypeAlias = str | tuple[float, float, float]
 
 
+def has_central_cost(ctrl: object) -> bool:
+   """Check if controller implements the central_cost interface."""
+   return all(hasattr(ctrl, name) for name in ("central_cost", "central_initial_guess", "horizon"))
+
+
 @dataclass
 class Route:
    waypoints: list[np.ndarray]

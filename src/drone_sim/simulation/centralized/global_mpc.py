@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints, VelocityConstraints)
-from drone_sim.domain.drone import Drone
-
-
-def _has_central_cost(ctrl: object) -> bool:
-   return all(hasattr(ctrl, name) for name in ("central_cost", "central_initial_guess", "horizon"))
+from drone_sim.domain.drone import Drone, has_central_cost
+from drone_sim.simulation.distributed.local_mpc import _pad_or_trim_horizon
 
 
 @dataclass
@@ -30,6 +27,18 @@ class GlobalMPCSolver:
    f_tol: float = 1e-3
    room_wall_tolerance: float = 0.0
    symmetry_break_accel: float = 0.05
+
+   # Cached constraint evaluators (created in __post_init__)
+   _collision_c: MovingObstacleAvoidanceConstraints = field(init=False, repr=False)
+   _obstacle_c: ObstacleAvoidanceConstraints = field(init=False, repr=False)
+   _room_c: RoomConstraints = field(init=False, repr=False)
+   _velocity_c: VelocityConstraints = field(init=False, repr=False)
+
+   def __post_init__(self) -> None:
+      self._collision_c = MovingObstacleAvoidanceConstraints(horizon=self.horizon)
+      self._obstacle_c = ObstacleAvoidanceConstraints(horizon=self.horizon)
+      self._room_c = RoomConstraints(horizon=self.horizon, wall_tolerance=self.room_wall_tolerance)
+      self._velocity_c = VelocityConstraints(horizon=self.horizon)
 
    def _pack(self, u: np.ndarray) -> np.ndarray:
       return np.asarray(u, dtype=float).reshape(-1)
@@ -86,18 +95,13 @@ class GlobalMPCSolver:
       pred_vel = {drone.drone_id: predicted_states[i, :, 3:6] for i, drone in enumerate(drones)}
       vals = np.array([], dtype=float)
 
-      vals = MovingObstacleAvoidanceConstraints(horizon=self.horizon).evaluate_multi(
-         drones, pred_pos, vals, pred_vel=pred_vel)
-
-      vals = ObstacleAvoidanceConstraints(horizon=self.horizon).evaluate_multi(
-         drones, pred_pos, obstacles, vals, pred_vel=pred_vel)
+      vals = self._collision_c.evaluate_multi(drones, pred_pos, vals, pred_vel=pred_vel)
+      vals = self._obstacle_c.evaluate_multi(drones, pred_pos, obstacles, vals, pred_vel=pred_vel)
 
       if room_min is not None and room_max is not None:
-         vals = RoomConstraints(horizon=self.horizon, wall_tolerance=self.room_wall_tolerance).evaluate_multi(
-            drones, pred_pos, room_max, room_min, vals, pred_vel=pred_vel)
+         vals = self._room_c.evaluate_multi(drones, pred_pos, room_max, room_min, vals, pred_vel=pred_vel)
 
-      vals = VelocityConstraints(horizon=self.horizon).evaluate_multi(
-         drones, predicted_states[:, :, 3:6], vals)
+      vals = self._velocity_c.evaluate_multi(drones, predicted_states[:, :, 3:6], vals)
 
       return vals
 
@@ -118,16 +122,18 @@ class GlobalMPCSolver:
       from scipy.optimize import minimize
 
       controllers = [d.controller for d in drones]
-      idx_opt = [i for i, ctrl in enumerate(controllers) if _has_central_cost(ctrl)]
+      idx_opt = [i for i, ctrl in enumerate(controllers) if has_central_cost(ctrl)]
 
       if not idx_opt:
          return {}, {}
 
-      opt_ids = [drones[i].drone_id for i in idx_opt]
-      num_optimized = len(idx_opt)
+      opt_drones = [drones[i] for i in idx_opt]
+      opt_controllers = [controllers[i] for i in idx_opt]
+      opt_ids = [d.drone_id for d in opt_drones]
+      num_optimized = len(opt_drones)
       u_prev = u_prev or {}
 
-      bounds_list = [drones[i].bounds() for i in idx_opt]
+      bounds_list = [d.bounds() for d in opt_drones]
       u_mins = np.array([b[0] for b in bounds_list], dtype=float).reshape(num_optimized, 3)
       u_maxs = np.array([b[1] for b in bounds_list], dtype=float).reshape(num_optimized, 3)
 
@@ -141,15 +147,10 @@ class GlobalMPCSolver:
          u0 = self._apply_symmetry_break(u0)
       else:
          # Build per-drone initial guesses, trim/pad to solver horizon
-         u_guess = []
-         for i in idx_opt:
-            ug = controllers[i].central_initial_guess(drones[i])  # type: ignore[attr-defined]
-            ug = np.asarray(ug, dtype=float).reshape((-1, 3))
-            if ug.shape[0] >= self.horizon:
-               ug = ug[:self.horizon]
-            else:
-               ug = np.concatenate([ug, np.repeat(ug[-1:, :], self.horizon - ug.shape[0], axis=0)])
-            u_guess.append(ug)
+         u_guess = [
+            _pad_or_trim_horizon(ctrl.central_initial_guess(d), self.horizon)  # type: ignore[attr-defined]
+            for d, ctrl in zip(opt_drones, opt_controllers)
+         ]
 
          u_guess = self._apply_symmetry_break(np.stack(u_guess, axis=0))
 
@@ -175,9 +176,6 @@ class GlobalMPCSolver:
       cons = {"type": "ineq", "fun": lambda u_flat: self._constraints(
          u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)}
 
-      opt_drones = [drones[i] for i in idx_opt]
-      opt_controllers = [controllers[i] for i in idx_opt]
-
       res = minimize(
          lambda u_flat: self._cost(u_flat, drones=opt_drones, controllers=opt_controllers, clip_u=clip_u),
          self._pack(u0), method="SLSQP", bounds=bounds, constraints=[cons],
@@ -194,9 +192,17 @@ class GlobalMPCSolver:
       sequences = {did: u_opt[k] for k, did in enumerate(opt_ids)}
       return controls, sequences
 
-   def _validate_constraint_margins(self, u_flat: np.ndarray, **constraint_kwargs) -> None:
+   def _validate_constraint_margins(
+      self,
+      u_flat: np.ndarray,
+      *,
+      drones: list[Drone],
+      obstacles: list[tuple[np.ndarray, float]],
+      room_min: np.ndarray | None,
+      room_max: np.ndarray | None,
+   ) -> None:
       """Raise RuntimeError if the solution violates constraints beyond numerical tolerance."""
-      g = self._constraints(u_flat, **constraint_kwargs)
+      g = self._constraints(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
       min_margin = float(g.min(initial=np.inf)) if g.size else float("inf")
       if not np.isfinite(min_margin):
          raise RuntimeError("CentralMPCGlobalCoordinator produced non-finite constraint margins.")

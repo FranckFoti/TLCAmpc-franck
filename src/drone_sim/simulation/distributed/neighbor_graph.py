@@ -62,10 +62,3 @@ class NeighborGraph:
         ]
         return sorted(pairs)
 
-    def get_all_drone_ids(self) -> list[str]:
-        """Get list of all drone IDs in the graph."""
-        return list(self._positions.keys())
-
-    def neighbor_count(self, drone_id: str) -> int:
-        """Get number of neighbors for a drone."""
-        return len(self._neighbors.get(drone_id, set()))

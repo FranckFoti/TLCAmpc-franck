@@ -89,34 +89,9 @@ class TestNeighborGraph:
 
         assert "drone-2" in graph.get_neighbors("drone-1")
 
-    def test_neighbor_count(self):
-        """neighbor_count returns correct count."""
-        graph = NeighborGraph(comm_radius=None)
-        positions = {
-            "drone-1": np.array([0.0, 0.0, 0.0]),
-            "drone-2": np.array([1.0, 0.0, 0.0]),
-            "drone-3": np.array([2.0, 0.0, 0.0]),
-        }
-        graph.update(positions)
-
-        assert graph.neighbor_count("drone-1") == 2
-
-    def test_get_all_drone_ids(self):
-        """get_all_drone_ids returns all tracked drones."""
-        graph = NeighborGraph()
-        positions = {
-            "drone-1": np.array([0.0, 0.0, 0.0]),
-            "drone-2": np.array([1.0, 0.0, 0.0]),
-        }
-        graph.update(positions)
-
-        ids = graph.get_all_drone_ids()
-        assert set(ids) == {"drone-1", "drone-2"}
-
     def test_empty_graph(self):
         """Empty graph returns empty results."""
         graph = NeighborGraph()
 
         assert graph.get_neighbors("drone-1") == set()
         assert graph.get_neighbor_pairs() == []
-        assert graph.get_all_drone_ids() == []

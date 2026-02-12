@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from drone_sim.controllers.central_cost import CentralMPCAgent
+from drone_sim.controllers.central_cost import AdaptiveMPCAgent, CentralMPCAgent
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.domain.registry import COORDINATORS
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
@@ -18,6 +18,7 @@ def _make_drone(
     cons_stop: float = 0.0,
     v_max: float = 5.0,
     dt: float = 0.1,
+    alpha: float | None = None,
 ) -> Drone:
     """Helper to create a Drone object for testing."""
     physics = LinearKinematicsPhysics(dt=dt, v_max=v_max)
@@ -33,6 +34,7 @@ def _make_drone(
         physics=physics,
         x=np.asarray(x, dtype=float).reshape(6),
         route=Route(waypoints=[], target=np.asarray(target, dtype=float).reshape(3)),
+        alpha=alpha,
     )
 
 
@@ -417,5 +419,118 @@ class TestDistributedCoordinatorIntegration:
 
         # Should still return controls
         assert len(result) == 2
+        assert np.all(np.isfinite(result["d1"]))
+        assert np.all(np.isfinite(result["d2"]))
+
+
+class TestDistributedMPCCoordinatorAdaptive:
+    """Tests for adaptive per-step safety radii in distributed MPC."""
+
+    def test_adaptive_safety_radii_computed(self):
+        """Two adaptive drones: verify per-step safety radii are used (not fixed)."""
+        dt = 0.1
+        horizon = 5
+        coordinator = DistributedMPCCoordinator(
+            dt=dt,
+            horizon=horizon,
+            rho=1.0,
+            max_admm_iter=20,
+            primal_tol=1e-2,
+            dual_tol=1e-2,
+        )
+
+        # Both adaptive with alpha=0.5, moving so they have velocity
+        controller1 = AdaptiveMPCAgent(dt=dt, horizon=horizon)
+        controller2 = AdaptiveMPCAgent(dt=dt, horizon=horizon)
+
+        result = coordinator.solve_controls(
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 1, 0, 0], dtype=float),
+                            np.array([5, 0, 0], dtype=float), controller1,
+                            radius=0.2, alpha=0.5),
+                _make_drone("d2", np.array([5, 0, 0, -1, 0, 0], dtype=float),
+                            np.array([0, 0, 0], dtype=float), controller2,
+                            radius=0.2, alpha=0.5),
+            ],
+            obstacles=[],
+        )
+
+        # Controls should be finite
+        assert np.all(np.isfinite(result["d1"]))
+        assert np.all(np.isfinite(result["d2"]))
+        assert result["d1"].shape == (3,)
+        assert result["d2"].shape == (3,)
+
+    def test_mixed_fixed_adaptive(self):
+        """One fixed drone, one adaptive: verify both get valid controls."""
+        dt = 0.1
+        horizon = 5
+        coordinator = DistributedMPCCoordinator(
+            dt=dt,
+            horizon=horizon,
+            rho=1.0,
+            max_admm_iter=20,
+            primal_tol=1e-2,
+            dual_tol=1e-2,
+        )
+
+        # d1: fixed (alpha=None), d2: adaptive (alpha=0.5)
+        controller1 = CentralMPCAgent(dt=dt, horizon=horizon)
+        controller2 = AdaptiveMPCAgent(dt=dt, horizon=horizon)
+
+        drone_fixed = _make_drone(
+            "d1", np.array([0, 0, 0, 0, 0, 0], dtype=float),
+            np.array([0, 0, 0], dtype=float), controller1,
+            safety_zone=1.0, alpha=None,
+        )
+        drone_adaptive = _make_drone(
+            "d2", np.array([5, 0, 0, 0, 0, 0], dtype=float),
+            np.array([5, 0, 0], dtype=float), controller2,
+            radius=0.2, safety_zone=1.0, alpha=0.5,
+        )
+
+        assert not drone_fixed.is_adaptive
+        assert drone_adaptive.is_adaptive
+
+        result = coordinator.solve_controls(
+            drones=[drone_fixed, drone_adaptive],
+            obstacles=[],
+        )
+
+        assert "d1" in result
+        assert "d2" in result
+        assert np.all(np.isfinite(result["d1"]))
+        assert np.all(np.isfinite(result["d2"]))
+
+    def test_adaptive_backward_compatible(self):
+        """Run existing 2-drone fixed scenario. Verify no regression."""
+        dt = 0.1
+        coordinator = DistributedMPCCoordinator(
+            dt=dt,
+            horizon=5,
+            rho=1.0,
+            max_admm_iter=20,
+            primal_tol=1e-2,
+            dual_tol=1e-2,
+        )
+
+        controller1 = CentralMPCAgent(dt=dt, horizon=5)
+        controller2 = CentralMPCAgent(dt=dt, horizon=5)
+
+        # Fixed drones (alpha=None by default)
+        result = coordinator.solve_controls(
+            drones=[
+                _make_drone("d1", np.array([0, 0, 0, 0, 0, 0], dtype=float),
+                            np.array([0, 0, 0], dtype=float), controller1),
+                _make_drone("d2", np.array([5, 0, 0, 0, 0, 0], dtype=float),
+                            np.array([5, 0, 0], dtype=float), controller2),
+            ],
+            obstacles=[],
+        )
+
+        assert "d1" in result
+        assert "d2" in result
+        assert result["d1"].shape == (3,)
+        assert result["d2"].shape == (3,)
         assert np.all(np.isfinite(result["d1"]))
         assert np.all(np.isfinite(result["d2"]))

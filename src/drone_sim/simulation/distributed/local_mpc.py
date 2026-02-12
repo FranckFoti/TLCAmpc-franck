@@ -12,6 +12,17 @@ if TYPE_CHECKING:
    from drone_sim.domain.drone import Drone
 
 
+def _pad_or_trim_horizon(u: np.ndarray, horizon: int) -> np.ndarray:
+   """Pad or trim a control sequence to match the given horizon."""
+   u = np.asarray(u, dtype=float).reshape((-1, 3))
+   if u.shape[0] < horizon:
+      pad = np.tile(u[-1:], (horizon - u.shape[0], 1))
+      u = np.concatenate([u, pad], axis=0)
+   elif u.shape[0] > horizon:
+      u = u[:horizon]
+   return u
+
+
 @dataclass
 class LocalMPCSolver:
    """Per-drone MPC solver for distributed optimization.
@@ -29,12 +40,13 @@ class LocalMPCSolver:
    max_iter: int = 100
    f_tol: float = 1e-4
 
-   def solve(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, float]], obstacles: list[tuple[np.ndarray, float]] | None = None,
+   def solve(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]], obstacles: list[tuple[np.ndarray, float]] | None = None,
          room_min: np.ndarray | None = None, room_max: np.ndarray | None = None, u_prev: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, bool]:
       """ Solve local MPC problem for a single drone.
 
       :param drone: Drone object with state, route, controller, and physics
-      :param neighbor_trajectories: Dict mapping neighbor_id to (trajectory (H,3), safety_zone)
+      :param neighbor_trajectories: Dict mapping neighbor_id to
+             (trajectory (H,3), predicted_velocities (H,3) or None).
       :param obstacles: List of (center, radius) static obstacles
       :param room_min: Room lower bounds (3,) or None
       :param room_max: Room upper bounds (3,) or None
@@ -55,13 +67,7 @@ class LocalMPCSolver:
          # Warm-start: shift previous solution
          u0 = np.concatenate([u_prev[1:], u_prev[-1:]], axis=0)
       else:
-         u0 = controller.central_initial_guess(drone)
-         # Ensure correct horizon length
-         if u0.shape[0] < horizon:
-            pad = np.tile(u0[-1:], (horizon - u0.shape[0], 1))
-            u0 = np.concatenate([u0, pad], axis=0)
-         elif u0.shape[0] > horizon:
-            u0 = u0[:horizon]
+         u0 = _pad_or_trim_horizon(controller.central_initial_guess(drone), horizon)
 
       u0 = np.clip(u0, u_min, u_max)
 

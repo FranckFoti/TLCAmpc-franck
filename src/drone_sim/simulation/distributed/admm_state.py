@@ -2,9 +2,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np
 
-from drone_sim.simulation.distributed.neighbor_graph import NeighborGraph
-
-
 @dataclass
 class ADMMState:
     """ADMM consensus state for distributed collision avoidance.
@@ -50,17 +47,18 @@ class ADMMState:
         pair: tuple[str, str],
         traj_i: np.ndarray,
         traj_j: np.ndarray,
-        min_dist: float,
+        min_dist: float | np.ndarray,
     ) -> None:
         """Update auxiliary variable z_ij with projection.
 
         z-update: z_ij = proj( (p_i - p_j) + lambda_ij / rho )
-        Projection enforces ||z_ij[k]|| >= min_dist at each timestep.
+        Projection enforces ||z_ij[k]|| >= min_dist[k] at each timestep.
 
         :param pair: (drone_i, drone_j) pair
         :param traj_i: Trajectory of drone i, shape (H, 3)
         :param traj_j: Trajectory of drone j, shape (H, 3)
-        :param min_dist: Minimum required distance
+        :param min_dist: Minimum required distance. Scalar float for uniform
+               distance, or np.ndarray of shape (H,) for per-step distances.
         """
         canonical = self._canonicalize_pair(pair)
         if canonical not in self._lambdas:
@@ -69,6 +67,13 @@ class ADMMState:
         traj_i = np.asarray(traj_i, dtype=float).reshape((self.horizon, 3))
         traj_j = np.asarray(traj_j, dtype=float).reshape((self.horizon, 3))
 
+        # Support both scalar and per-step min_dist
+        min_dists = (
+            np.full(self.horizon, min_dist)
+            if np.isscalar(min_dist)
+            else np.asarray(min_dist, dtype=float)
+        )
+
         # Store previous z for dual residual computation
         self._prev_z[canonical] = self._z[canonical].copy()
 
@@ -76,14 +81,16 @@ class ADMMState:
         diff = traj_i - traj_j
         z_unproj = diff + lam / self.rho
 
-        # Project to satisfy ||z|| >= min_dist at each timestep
+        # Project to satisfy ||z|| >= min_dists at each timestep
         norms = np.linalg.norm(z_unproj, axis=1, keepdims=True)  # (H, 1)
         near_zero = norms.ravel() < 1e-10
-        needs_scale = (~near_zero) & (norms.ravel() < min_dist)
+        needs_scale = (~near_zero) & (norms.ravel() < min_dists)
 
         z_new = z_unproj.copy()
-        z_new[near_zero] = np.array([min_dist, 0.0, 0.0])
-        z_new[needs_scale] = z_unproj[needs_scale] * (min_dist / norms[needs_scale])
+        # For near-zero vectors, set direction along x-axis with per-step min_dist
+        z_new[near_zero, 0] = min_dists[near_zero]
+        z_new[near_zero, 1:] = 0.0
+        z_new[needs_scale] = z_unproj[needs_scale] * (min_dists[needs_scale, None] / norms[needs_scale])
 
         self._z[canonical] = z_new
 
@@ -112,56 +119,6 @@ class ADMMState:
         z = self._z[canonical]
 
         self._lambdas[canonical] += self.rho * (diff - z)
-
-    def get_consensus_term(
-        self,
-        drone_id: str,
-        trajectories: dict[str, np.ndarray],
-        neighbor_graph: NeighborGraph,
-    ) -> np.ndarray:
-        """Get ADMM consensus gradient term for a drone's local cost.
-
-        Returns the gradient contribution from ADMM augmented Lagrangian:
-        Sum over neighbors j: lambda_ij + rho * (p_i - p_j - z_ij)
-        Sign depends on whether drone_id is the first or second in the pair.
-
-        :param drone_id: ID of the drone
-        :param trajectories: Dict mapping drone_id to trajectory (H, 3)
-        :param neighbor_graph: NeighborGraph for determining neighbors
-        :return: Consensus term (H, 3) to add to local gradient
-        """
-        result = np.zeros((self.horizon, 3), dtype=float)
-        neighbors = neighbor_graph.get_neighbors(drone_id)
-
-        traj_i = np.asarray(trajectories.get(drone_id, np.zeros((self.horizon, 3))),
-                           dtype=float).reshape((self.horizon, 3))
-
-        for neighbor_id in neighbors:
-            if neighbor_id not in trajectories:
-                continue
-
-            traj_j = np.asarray(trajectories[neighbor_id],
-                               dtype=float).reshape((self.horizon, 3))
-
-            canonical = self._canonicalize_pair((drone_id, neighbor_id))
-            if canonical not in self._lambdas:
-                continue
-
-            lam = self._lambdas[canonical]
-            z = self._z[canonical]
-
-            # Compute residual
-            diff = traj_i - traj_j
-            residual = diff - z
-
-            # Sign depends on position in canonical pair
-            term = lam + self.rho * residual
-            if drone_id == canonical[0]:
-                result += term
-            else:
-                result -= term
-
-        return result
 
     def compute_residuals(
         self,

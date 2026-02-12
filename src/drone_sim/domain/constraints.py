@@ -76,7 +76,7 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       self,
       drone: Drone,
       pred_pos: np.ndarray,
-      neighbor_trajectories: dict[str, tuple[np.ndarray, float]],
+      neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]],
       values: np.ndarray,
       pred_vel: np.ndarray | None = None,
    ) -> np.ndarray:
@@ -84,7 +84,9 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
 
       :param drone: the drone.
       :param pred_pos: predicted positions per time step (shape: (horizon, 3)).
-      :param neighbor_trajectories: mapping of neighbor id to (traj, safety_zone).
+      :param neighbor_trajectories: mapping of neighbor id to
+             (trajectory (H,3), predicted_velocities (H,3) or None).
+             Uses ego drone's config to compute neighbor adaptive radii.
       :param values: combined constraint values to append to.
       :param pred_vel: optional predicted velocities (shape: (horizon, 3)).
                        When provided and the drone is adaptive, per-step adaptive radii are used.
@@ -132,37 +134,33 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
             parts.append(result)
       return np.concatenate([values, *parts])
 
-   def _get_neighbor_trajectories(self, current_id: str, drones: list[Drone], pred_pos: dict[str, np.ndarray]):
-      neighbors = {}
-      for drone in drones:
-         if drone.drone_id == current_id:
-            continue
-         neighbors[drone.drone_id] = (pred_pos[drone.drone_id], drone.safety_zone)
-      return neighbors
-
    def _evaluate(
       self,
       drone: Drone,
       pred_pos: np.ndarray,
-      neighbor_trajectories: dict[str, tuple[np.ndarray, float]],
+      neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]],
       pred_vel: np.ndarray | None = None,
    ):
       """Evaluate collision constraints against neighbor trajectories.
 
       :param drone: the ego drone.
       :param pred_pos: predicted positions (horizon, 3).
-      :param neighbor_trajectories: neighbor data mapping id to (traj, safety_zone).
+      :param neighbor_trajectories: neighbor data mapping id to
+             (trajectory (H,3), predicted_velocities (H,3) or None).
+             Neighbor adaptive radii are computed using the ego drone's config
+             ("same drone type" assumption).
       :param pred_vel: optional predicted velocities for the ego drone (horizon, 3).
       :return: constraint margin array.
       """
       parts = []
-      for neighbor_traj, neighbor_sz in neighbor_trajectories.values():
+      for neighbor_traj, neighbor_vel in neighbor_trajectories.values():
          neighbor_traj = np.asarray(neighbor_traj, dtype=float).reshape((self._horizon, 3))
          result = np.zeros(self._horizon)
          for step in range(self._horizon):
             safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
+            neighbor_safety = _safety_radius(drone, _velocity_at_step(neighbor_vel, step))
             dist = float(np.linalg.norm(pred_pos[step] - neighbor_traj[step]))
-            result[step] = dist - (safety + neighbor_sz)
+            result[step] = dist - (safety + neighbor_safety)
          parts.append(result)
       if not parts:
          return np.zeros(0)
