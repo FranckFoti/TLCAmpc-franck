@@ -78,7 +78,7 @@ class Drone:
       u_max_scalar = float(np.min(np.abs(u_max)))
       v_norm_sq = float(np.dot(velocity, velocity))
       s_stop = v_norm_sq / (2.0 * u_max_scalar)
-      return self.radius + self.alpha * s_stop
+      return max(self.safety_zone, self.radius + self.alpha * s_stop)
 
    def predict(self, u: np.ndarray) -> np.ndarray:
       return self.physics.step(self.x, u)

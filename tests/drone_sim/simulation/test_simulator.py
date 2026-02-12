@@ -407,7 +407,7 @@ class TestSimulatorAdaptiveConfigPipeline:
 
       # Adaptive drone
       assert adaptive_drone.is_adaptive is True
-      assert adaptive_drone.compute_adaptive_radius(np.zeros(3)) == adaptive_drone.radius
+      assert adaptive_drone.compute_adaptive_radius(np.zeros(3)) == adaptive_drone.safety_zone
 
 
 class TestSimulatorEdgeCases:

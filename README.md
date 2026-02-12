@@ -262,7 +262,27 @@ The main constraints (implemented in the `mpc_central` coordinator) are:
 These constraints are enforced within the centralized SLSQP optimization and are additionally checked at the simulation level (via `Simulator._compute_collisions` and the verification script).
 
 
-## 6. Citation
+## 6. MPC Weight Tuning Reference
+
+A parameter sweep over the MPC cost weights `q_pos`, `q_vel`, and `r_u` was conducted across multiple scenario configurations (3–6 drones, varying safety zones, control bounds, and room sizes). Results are stored in `drones_paper_tests/qr_param_swep_result/`.
+
+| Parameter | Good Range | Notes |
+|-----------|-----------|-------|
+| `r_u` | 0.1–1.0 | Lower `r_u` requires higher `q_pos` to compensate |
+| `q_pos` | 1.0–6.0 | Position tracking weight |
+| `q_vel` | 0.1–1.0 | Best kept low (e.g. 0.2) |
+
+**Known-good combinations:**
+- `r_u=0.5`, `q_pos=2.0`, `q_vel=0.2`
+- `r_u=0.8`, `q_pos=5.0`, `q_vel=0.2`
+
+<p align="center">
+  <img src="./drones_paper_tests/qr_param_swep_result/results/weight_heatmap.png" width="600" alt="QR Weight Parameter Sweep Heatmap">
+</p>
+
+These serve as baseline weights for adaptive safety zone tuning (`alpha`, `lambda_vel`).
+
+## 7. Citation
 If you use this code or build upon our work, please cite our paper:
 
 
