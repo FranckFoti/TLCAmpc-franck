@@ -6,6 +6,13 @@ import numpy as np
 from drone_sim.domain.drone import Drone
 
 
+def _velocity_at_step(pred_vel: np.ndarray | None, step: int) -> np.ndarray | None:
+   """Extract the velocity vector at a given step, or ``None`` if unavailable."""
+   if pred_vel is not None:
+      return pred_vel[step]
+   return None
+
+
 def _safety_radius(drone: Drone, velocity: np.ndarray | None) -> float:
    """Compute the safety radius for a drone at a given velocity.
 
@@ -35,35 +42,30 @@ class VelocityConstraints(MPCConstraints):
       return "velocity"
 
    def evaluate_single(self, drone_state: Drone, v_pred: np.ndarray, values: np.ndarray) -> np.ndarray:
-      """ Evaluate velocity constraints for a single drone.
-      :param drone_state: the drone
-      :param v_pred: predicted velocity for the drone for each time step (shape: (horizon, 3))
-      :param values: combined list for all constraints, will be filled in row, this step appends velocity constraints for the drone
-      :return: updated values list
+      """Evaluate velocity constraints for a single drone.
+
+      :param drone_state: the drone.
+      :param v_pred: predicted velocity per time step (shape: (horizon, 3)).
+      :param values: combined constraint values to append to.
+      :return: updated values list.
       """
-      result = np.zeros(self._horizon)
-      for step in range(self._horizon):
-         vel = v_pred[step, :]
-         v_max = drone_state.v_max
-         result[step] = v_max ** 2 - float(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
+      speed_sq = np.sum(v_pred[:self._horizon] ** 2, axis=1)
+      result = drone_state.v_max ** 2 - speed_sq
       return np.concatenate([values, result])
 
    def evaluate_multi(self, drone_states: list[Drone], v_pred: np.ndarray, values: np.ndarray) -> np.ndarray:
-      """ Evaluate velocity constraints for multiple drones.
-      :param drone_states: list of drones
-      :param v_pred: predicted velocity for each drone for each time step (shape: (num_drones, horizon, 3))
-      :param values: combined list for all constraints, will be filled in row, this step appends velocity constraints for each drone
-      :return: updated values list
+      """Evaluate velocity constraints for multiple drones.
+
+      :param drone_states: list of drones.
+      :param v_pred: predicted velocity per drone per time step (shape: (num_drones, horizon, 3)).
+      :param values: combined constraint values to append to.
+      :return: updated values list.
       """
-      result = np.zeros(self._horizon * len(drone_states))
-      count = 0
-      for drone_idx in range(len(drone_states)):
-         for step in range(self._horizon):
-            vel = v_pred[drone_idx][step]  # (vx, vy, vz)
-            v_max = drone_states[drone_idx].v_max
-            result[count] = v_max ** 2 - float(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
-            count += 1
-      return np.concatenate([values, result])
+      parts = []
+      for drone_idx, drone in enumerate(drone_states):
+         speed_sq = np.sum(v_pred[drone_idx, :self._horizon] ** 2, axis=1)
+         parts.append(drone.v_max ** 2 - speed_sq)
+      return np.concatenate([values, *parts])
 
 
 class MovingObstacleAvoidanceConstraints(MPCConstraints):
@@ -78,17 +80,17 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       values: np.ndarray,
       pred_vel: np.ndarray | None = None,
    ) -> np.ndarray:
-      """ Evaluate moving obstacle avoidance constraints for a single drone.
-      :param drone: the drone
-      :param pred_pos: predicted positions for the drone for each time step (shape: (horizon, 3))
-      :param neighbor_trajectories: predicted trajectories of neighbors (shape: (num_neighbors, horizon, 3))
-      :param values: combined list for all constraints, will be filled in row, this step appends collision constraints for the drone
-      :param pred_vel: optional predicted velocities for the drone (shape: (horizon, 3)).
+      """Evaluate moving obstacle avoidance constraints for a single drone.
+
+      :param drone: the drone.
+      :param pred_pos: predicted positions per time step (shape: (horizon, 3)).
+      :param neighbor_trajectories: mapping of neighbor id to (traj, safety_zone).
+      :param values: combined constraint values to append to.
+      :param pred_vel: optional predicted velocities (shape: (horizon, 3)).
                        When provided and the drone is adaptive, per-step adaptive radii are used.
-      :return: updated values list
+      :return: updated values list.
       """
       result = self._evaluate(drone, pred_pos, neighbor_trajectories, pred_vel=pred_vel)
-
       return np.concatenate([values, result])
 
    def evaluate_multi(
@@ -98,7 +100,7 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       values: np.ndarray,
       pred_vel: dict[str, np.ndarray] | None = None,
    ) -> np.ndarray:
-      """ Evaluate collision avoidance for all drone pairs.
+      """Evaluate collision avoidance for all drone pairs.
 
       Uses i<j pairs to avoid duplicates. Includes cons_stop since all drone
       info is available in the multi-drone case.
@@ -111,23 +113,24 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
                        drones use per-step adaptive radii.
       :return: updated values list.
       """
+      parts = []
       for i in range(len(drones)):
          for j in range(i + 1, len(drones)):
             drone_i = drones[i]
             drone_j = drones[j]
             traj_i = pred_pos[drone_i.drone_id]
             traj_j = pred_pos[drone_j.drone_id]
-            pred_vel_i = pred_vel[drone_i.drone_id] if pred_vel is not None else None
-            pred_vel_j = pred_vel[drone_j.drone_id] if pred_vel is not None else None
+            vel_i = pred_vel[drone_i.drone_id] if pred_vel is not None else None
+            vel_j = pred_vel[drone_j.drone_id] if pred_vel is not None else None
 
             result = np.zeros(self._horizon)
             for step in range(self._horizon):
-               safety_i = _safety_radius(drone_i, pred_vel_i[step] if pred_vel_i is not None else None)
-               safety_j = _safety_radius(drone_j, pred_vel_j[step] if pred_vel_j is not None else None)
+               safety_i = _safety_radius(drone_i, _velocity_at_step(vel_i, step))
+               safety_j = _safety_radius(drone_j, _velocity_at_step(vel_j, step))
                dist = float(np.linalg.norm(traj_i[step] - traj_j[step]))
                result[step] = dist - (safety_i + safety_j + drone_i.cons_stop + drone_j.cons_stop)
-            values = np.concatenate([values, result])
-      return values
+            parts.append(result)
+      return np.concatenate([values, *parts])
 
    def _get_neighbor_trajectories(self, current_id: str, drones: list[Drone], pred_pos: dict[str, np.ndarray]):
       neighbors = {}
@@ -152,18 +155,18 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       :param pred_vel: optional predicted velocities for the ego drone (horizon, 3).
       :return: constraint margin array.
       """
-      result = np.zeros(self._horizon * len(neighbor_trajectories))
-      count = 0
-      for neighbor_id, (neighbor_traj, neighbor_sz) in neighbor_trajectories.items():
+      parts = []
+      for neighbor_traj, neighbor_sz in neighbor_trajectories.values():
          neighbor_traj = np.asarray(neighbor_traj, dtype=float).reshape((self._horizon, 3))
-
+         result = np.zeros(self._horizon)
          for step in range(self._horizon):
-            safety_i = _safety_radius(drone, pred_vel[step] if pred_vel is not None else None)
-            min_dist = safety_i + neighbor_sz
+            safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
             dist = float(np.linalg.norm(pred_pos[step] - neighbor_traj[step]))
-            result[count] = dist - min_dist
-            count += 1
-      return result
+            result[step] = dist - (safety + neighbor_sz)
+         parts.append(result)
+      if not parts:
+         return np.zeros(0)
+      return np.concatenate(parts)
 
 
 class ObstacleAvoidanceConstraints(MPCConstraints):
@@ -178,14 +181,15 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
       values: np.ndarray,
       pred_vel: np.ndarray | None = None,
    ) -> np.ndarray:
-      """ Evaluate obstacle avoidance constraints for a single drone.
-      :param drone: the drone
-      :param pred_pos: one predicted position for each time step (shape: (horizon, 3))
-      :param obstacles: list of obstacles, each obstacle is a tuple of (center, radius)
-      :param values: combined list for all constraints, will be filled in row, this step appends obstacle constraints for the drone
+      """Evaluate obstacle avoidance constraints for a single drone.
+
+      :param drone: the drone.
+      :param pred_pos: predicted position per time step (shape: (horizon, 3)).
+      :param obstacles: list of obstacles, each a (center, radius) tuple.
+      :param values: combined constraint values to append to.
       :param pred_vel: optional predicted velocities (shape: (horizon, 3)).
                        When provided and the drone is adaptive, per-step adaptive radii are used.
-      :return: updated values list
+      :return: updated values list.
       """
       result = self._evaluate(drone, pred_pos, obstacles, pred_vel=pred_vel)
       return np.concatenate([values, result])
@@ -198,22 +202,20 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
       values: np.ndarray,
       pred_vel: dict[str, np.ndarray] | None = None,
    ) -> np.ndarray:
-      """ Evaluate obstacle avoidance constraints for multiple drones.
-      :param drones: list of Drones involved
-      :param pred_pos: predicted positions for the drones keyed by drone_id
-      :param obstacles: list of obstacles, each obstacle is a tuple of (center, radius)
-      :param values: combined list for all constraints, will be filled in row, this step appends obstacle constraints for each drone
+      """Evaluate obstacle avoidance constraints for multiple drones.
+
+      :param drones: list of Drones involved.
+      :param pred_pos: predicted positions for the drones keyed by drone_id.
+      :param obstacles: list of obstacles, each a (center, radius) tuple.
+      :param values: combined constraint values to append to.
       :param pred_vel: optional dict mapping drone_id to predicted velocity arrays (shape: (horizon, 3)).
-      :return: updated values list
+      :return: updated values list.
       """
-      result = np.zeros(self._horizon * len(drones))
-      count = 0
-      for drone_idx in range(len(drones)):
-         drone = drones[drone_idx]
+      parts = []
+      for drone in drones:
          vel = pred_vel[drone.drone_id] if pred_vel is not None else None
-         result[count:count + self._horizon] = self._evaluate(drone, pred_pos[drone.drone_id], obstacles, pred_vel=vel)
-         count += self._horizon
-      return np.concatenate([values, result])
+         parts.append(self._evaluate(drone, pred_pos[drone.drone_id], obstacles, pred_vel=vel))
+      return np.concatenate([values, *parts])
 
    def _evaluate(
       self,
@@ -234,10 +236,9 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
       for center, radius in obstacles:
          obstacle_center = np.asarray(center, dtype=float).reshape(3)
          for step in range(self._horizon):
-            safety = _safety_radius(drone, pred_vel[step] if pred_vel is not None else None)
-            min_dist = safety + radius
+            safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
             dist = float(np.linalg.norm(pred_pos[step] - obstacle_center))
-            result[step] = dist - min_dist
+            result[step] = dist - (safety + radius)
       return result
 
 
@@ -259,16 +260,17 @@ class RoomConstraints(MPCConstraints):
       room_is_sphere: bool = False,
       pred_vel: np.ndarray | None = None,
    ) -> np.ndarray:
-      """ Evaluate room boundary constraints for a single drone.
-      :param drone: the drone
-      :param pred_pos: predicted positions for the drone for each time step (shape: (horizon, 3))
-      :param room_max: room upper bounds (3,) for box or radius for sphere
-      :param room_min: room lower bounds (3,) for box or unused for sphere
-      :param values: combined list for all constraints, will be filled in row
-      :param room_is_sphere: if True, room_max is treated as sphere radius
+      """Evaluate room boundary constraints for a single drone.
+
+      :param drone: the drone.
+      :param pred_pos: predicted positions per time step (shape: (horizon, 3)).
+      :param room_max: room upper bounds (3,) for box or radius for sphere.
+      :param room_min: room lower bounds (3,) for box or unused for sphere.
+      :param values: combined constraint values to append to.
+      :param room_is_sphere: if True, room_max is treated as sphere radius.
       :param pred_vel: optional predicted velocities (shape: (horizon, 3)).
                        When provided and the drone is adaptive, per-step adaptive radii are used.
-      :return: updated values list
+      :return: updated values list.
       """
       result = self._evaluate(drone, pred_pos, room_max, room_min, room_is_sphere, pred_vel=pred_vel)
       return np.concatenate([values, result])
@@ -283,22 +285,22 @@ class RoomConstraints(MPCConstraints):
       room_is_sphere: bool = False,
       pred_vel: dict[str, np.ndarray] | None = None,
    ) -> np.ndarray:
-      """ Evaluate room boundary constraints for multiple drones.
-      :param drones: list of Drones involved
-      :param pred_pos: predicted positions for the drones keyed by drone_id
-      :param room_max: room upper bounds (3,) for box or radius for sphere
-      :param room_min: room lower bounds (3,) for box or unused for sphere
-      :param values: combined list for all constraints, will be filled in row
-      :param room_is_sphere: if True, room_max is treated as sphere radius
+      """Evaluate room boundary constraints for multiple drones.
+
+      :param drones: list of Drones involved.
+      :param pred_pos: predicted positions for the drones keyed by drone_id.
+      :param room_max: room upper bounds (3,) for box or radius for sphere.
+      :param room_min: room lower bounds (3,) for box or unused for sphere.
+      :param values: combined constraint values to append to.
+      :param room_is_sphere: if True, room_max is treated as sphere radius.
       :param pred_vel: optional dict mapping drone_id to predicted velocity arrays (shape: (horizon, 3)).
-      :return: updated values list
+      :return: updated values list.
       """
-      for drone_idx in range(len(drones)):
-         drone = drones[drone_idx]
+      parts = []
+      for drone in drones:
          vel = pred_vel[drone.drone_id] if pred_vel is not None else None
-         result = self._evaluate(drone, pred_pos[drone.drone_id], room_max, room_min, room_is_sphere, pred_vel=vel)
-         values = np.concatenate([values, result])
-      return values
+         parts.append(self._evaluate(drone, pred_pos[drone.drone_id], room_max, room_min, room_is_sphere, pred_vel=vel))
+      return np.concatenate([values, *parts])
 
    def _evaluate(
       self,
@@ -327,7 +329,7 @@ class RoomConstraints(MPCConstraints):
       count = 0
       for step in range(self._horizon):
          pos = pred_pos[step]
-         safety = _safety_radius(drone, pred_vel[step] if pred_vel is not None else None)
+         safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
          for axis in range(3):
             result[count] = float(pos[axis] - safety - lower_bounds[axis]) + self._wall_tolerance
             count += 1
@@ -345,7 +347,7 @@ class RoomConstraints(MPCConstraints):
    ) -> np.ndarray:
       result = np.zeros(self._horizon)
       for step in range(self._horizon):
-         dist = float(np.linalg.norm(pred_pos[step]))  # center is always (0,0,0)
-         safety = _safety_radius(drone, pred_vel[step] if pred_vel is not None else None)
+         dist = float(np.linalg.norm(pred_pos[step]))
+         safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
          result[step] = room_radius - dist - safety
       return result
