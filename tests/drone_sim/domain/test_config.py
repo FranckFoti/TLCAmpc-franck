@@ -119,6 +119,34 @@ class TestDroneConfig:
       cfg = DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], waypoints=[], target=[5.0, 5.0, 5.0])
       assert cfg.waypoints == []
 
+   def test_drone_config_default_alpha_is_none(self):
+      """Test default config has alpha=None (fixed mode)."""
+      cfg = DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0])
+      assert cfg.alpha is None
+
+   def test_drone_config_with_alpha(self):
+      """Test setting alpha makes config adaptive."""
+      cfg = DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0], alpha=0.5)
+      assert cfg.alpha == 0.5
+
+   def test_drone_config_alpha_must_be_positive(self):
+      """Test alpha=0 or alpha=-1 raises validation error."""
+      with pytest.raises(ValidationError, match="alpha must be positive"):
+         DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0], alpha=0.0)
+      with pytest.raises(ValidationError, match="alpha must be positive"):
+         DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0], alpha=-1.0)
+
+   def test_drone_config_existing_configs_unchanged(self):
+      """Test existing config without alpha works exactly as before."""
+      cfg = DroneConfig(
+         drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0],
+         radius=0.3, safety_zone=1.5, cons_stop=0.1,
+      )
+      assert cfg.alpha is None
+      assert cfg.radius == 0.3
+      assert cfg.safety_zone == 1.5
+      assert cfg.cons_stop == 0.1
+
 
 class TestObstacleConfig:
    """Tests for ObstacleConfig model."""

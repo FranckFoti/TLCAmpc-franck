@@ -108,7 +108,7 @@ class Simulator:
          drones.append(Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone,
                              cons_stop=drone_cfg.cons_stop, color=drone_color, safety_color=safety_color,
                              trace_color=trace_color, controller=controller, physics=drone_physics,
-                             x=x0, route=route))
+                             x=x0, route=route, alpha=drone_cfg.alpha))
 
       obstacles = [(np.asarray(o.center, dtype=float), float(o.radius)) for o in cfg.obstacles]
 
@@ -149,6 +149,9 @@ class Simulator:
 
          A collision is reported when another drone enters the owner's safety sphere (radius = owner.safety_zone + intruder.radius)
          or when an obstacle center enters radius = owner.safety_zone + obstacle.radius.
+
+         Note: collision DETECTION stays with fixed safety_zone for now.
+         Adaptive radius only affects MPC constraints (Phase 10).
       """
       events: list[dict] = []
 

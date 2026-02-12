@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 ColorValue = str | list[float]
 
@@ -39,6 +39,11 @@ class DroneConfig(BaseModel):
    # Conservative stopping addition, like it is shown in the paper
    cons_stop: float = 0.0
 
+   # Adaptive safety zone parameter. When set, the drone uses a velocity-dependent
+   # safety radius: r(t) = r_min + alpha * ||v||^2 / (2 * U_max).
+   # When None, the fixed safety_zone is used instead.
+   alpha: float | None = None
+
    # Colors used by the renderer. Each field accepts either:
    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
    # - an RGB list [r,g,b] either in 0..1 or 0..255.
@@ -47,6 +52,12 @@ class DroneConfig(BaseModel):
    safety_color: ColorValue | None = None
    # If omitted, the renderer uses the drone_color.
    trace_color: ColorValue | None = None
+
+   @model_validator(mode="after")
+   def _validate_alpha(self) -> DroneConfig:
+      if self.alpha is not None and self.alpha <= 0:
+         raise ValueError("alpha must be positive when set")
+      return self
 
 
 class ObstacleConfig(BaseModel):
