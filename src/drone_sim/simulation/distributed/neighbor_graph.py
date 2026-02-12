@@ -54,10 +54,12 @@ class NeighborGraph:
 
         Useful for generating pairwise collision constraints.
         """
-        pairs: set[tuple[str, str]] = set()
-        for id_i, neighbors in self._neighbors.items():
-            for id_j in neighbors:
-                pairs.add(tuple(sorted([id_i, id_j])))
+        pairs = [
+            (id_i, id_j)
+            for id_i, neighbors in self._neighbors.items()
+            for id_j in neighbors
+            if id_i < id_j
+        ]
         return sorted(pairs)
 
     def get_all_drone_ids(self) -> list[str]:

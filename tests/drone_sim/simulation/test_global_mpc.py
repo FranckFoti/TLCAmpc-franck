@@ -30,6 +30,7 @@ def _make_drone(
     u_min: list[float] | None = None,
     u_max: list[float] | None = None,
     dt: float = 0.1,
+    alpha: float | None = None,
 ) -> Drone:
     """Helper to create a Drone object for testing."""
     physics = LinearKinematicsPhysics(dt=dt, v_max=v_max, u_min=u_min, u_max=u_max)
@@ -45,6 +46,7 @@ def _make_drone(
         physics=physics,
         x=np.asarray(x, dtype=float).reshape(6),
         route=Route(waypoints=[], target=np.asarray(target, dtype=float).reshape(3)),
+        alpha=alpha,
     )
 
 
@@ -389,3 +391,74 @@ class TestGlobalMPCSolverSolve:
 
       assert controls == {}
       assert u_sequences == {}
+
+
+class TestGlobalMPCSolverAdaptive:
+   """Tests for adaptive constraint passthrough in GlobalMPCSolver."""
+
+   @pytest.fixture
+   def solver(self) -> GlobalMPCSolver:
+      return GlobalMPCSolver(dt=0.1, horizon=5)
+
+   def test_constraints_with_adaptive_drone(self, solver: GlobalMPCSolver):
+      """Adaptive drone pair produces tighter constraints than fixed drones at same positions with velocity."""
+      controller = CentralMPCAgent(dt=solver.dt, horizon=solver.horizon)
+
+      # Two adaptive drones with velocity toward each other (speed=3 > 2.19 threshold
+      # where adaptive radius exceeds fixed safety_zone=1.0)
+      d1_adaptive = _make_drone("d1", np.array([0.0, 0.0, 0.0, 3.0, 0.0, 0.0]), np.array([5.0, 0.0, 0.0]),
+                                controller, safety_zone=1.0, alpha=1.0)
+      d2_adaptive = _make_drone("d2", np.array([8.0, 0.0, 0.0, -3.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]),
+                                controller, safety_zone=1.0, alpha=1.0)
+
+      # Same positions/velocities but fixed drones (no alpha)
+      d1_fixed = _make_drone("d1", np.array([0.0, 0.0, 0.0, 3.0, 0.0, 0.0]), np.array([5.0, 0.0, 0.0]),
+                             controller, safety_zone=1.0)
+      d2_fixed = _make_drone("d2", np.array([8.0, 0.0, 0.0, -3.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]),
+                             controller, safety_zone=1.0)
+
+      # Use zero control to maintain velocities
+      u_flat = np.zeros(2 * solver.horizon * 3)
+
+      g_adaptive = solver._constraints(u_flat, drones=[d1_adaptive, d2_adaptive], obstacles=[], room_min=None, room_max=None)
+      g_fixed = solver._constraints(u_flat, drones=[d1_fixed, d2_fixed], obstacles=[], room_min=None, room_max=None)
+
+      # Adaptive radii grow with velocity, so collision constraint margins should be smaller (tighter)
+      # Both arrays have same structure; compare the collision constraint portion (first H values)
+      assert g_adaptive[:solver.horizon].min() < g_fixed[:solver.horizon].min()
+
+   def test_constraints_fixed_drones_unchanged(self, solver: GlobalMPCSolver):
+      """Fixed drones produce identical constraint values regardless of pred_vel passing."""
+      controller = CentralMPCAgent(dt=solver.dt, horizon=solver.horizon)
+
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), controller, safety_zone=1.0)
+      d2 = _make_drone("d2", np.array([10.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), controller, safety_zone=1.0)
+      u_flat = np.zeros(2 * solver.horizon * 3)
+
+      g = solver._constraints(u_flat, drones=[d1, d2], obstacles=[], room_min=None, room_max=None)
+
+      # All constraints should be satisfied for far-apart stationary drones
+      assert np.all(g >= 0)
+      # Collision margin: dist=10, threshold=safety_zone_i + safety_zone_j = 2.0, margin=8.0
+      assert g[0] == pytest.approx(8.0, abs=0.1)
+
+   def test_solve_with_adaptive_drone(self, solver: GlobalMPCSolver):
+      """Solver returns valid controls when one drone is adaptive."""
+      controller = CentralMPCAgent(dt=solver.dt, horizon=solver.horizon)
+
+      d1 = _make_drone("d1", np.array([0.0, 0.0, 5.0, 0.0, 0.0, 0.0]), np.array([5.0, 0.0, 5.0]),
+                        controller, alpha=1.0)
+      d2 = _make_drone("d2", np.array([10.0, 0.0, 5.0, 0.0, 0.0, 0.0]), np.array([5.0, 0.0, 5.0]),
+                        controller)
+
+      controls, u_sequences = solver.solve(
+         drones=[d1, d2],
+         obstacles=[],
+         room_min=np.array([-10.0, -10.0, 0.0]),
+         room_max=np.array([20.0, 20.0, 20.0]),
+      )
+
+      assert "d1" in controls
+      assert "d2" in controls
+      assert np.all(np.isfinite(controls["d1"]))
+      assert np.all(np.isfinite(controls["d2"]))

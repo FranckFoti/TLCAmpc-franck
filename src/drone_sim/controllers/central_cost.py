@@ -84,3 +84,37 @@ class CentralMPCAgent(Controller):
    def control(self, drone: Drone, neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]],
                obstacles: list[tuple[np.ndarray, float]]) -> np.ndarray:
       return self.central_initial_guess(drone)[0]
+
+
+@register_controller("mpc_agent_adaptive")
+@dataclass
+class AdaptiveMPCAgent(CentralMPCAgent):
+   """Per-drone cost model with velocity magnitude penalty for adaptive safety zones.
+
+   Adds ``lambda_vel * ||v||^2`` per step on top of the parent cost.
+   When drones use adaptive safety zones, higher velocity leads to larger
+   safety radii.  The velocity penalty encourages deceleration near
+   conflicts, naturally shrinking the safety zone.
+   """
+
+   lambda_vel: float = 1.0
+
+   def central_cost(self, u_seq: np.ndarray, drone: Drone) -> float:
+      u_seq = np.asarray(u_seq, dtype=float).reshape((-1, 3))
+
+      x = np.asarray(drone.x, dtype=float).reshape(6)
+      p_ref = np.asarray(drone.route.current_ref(), dtype=float).reshape(3)
+
+      total = 0.0
+      for k in range(u_seq.shape[0]):
+         x = drone.physics.step(x, u_seq[k])
+         e = x[:3] - p_ref
+         v = x[3:]
+         total += float(
+            e @ self._Qp @ e
+            + v @ self._Qv @ v
+            + u_seq[k] @ self._R @ u_seq[k]
+            + self.lambda_vel * float(np.dot(v, v))
+         )
+
+      return float(total)

@@ -72,10 +72,7 @@ class ADMMState:
         # Store previous z for dual residual computation
         self._prev_z[canonical] = self._z[canonical].copy()
 
-        # Compute scaled dual variable
         lam = self._lambdas[canonical]
-
-        # z = proj( (p_i - p_j) + lambda / rho )
         diff = traj_i - traj_j
         z_unproj = diff + lam / self.rho
 

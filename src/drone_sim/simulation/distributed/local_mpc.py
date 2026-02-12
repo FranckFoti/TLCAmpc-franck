@@ -65,6 +65,11 @@ class LocalMPCSolver:
 
       u0 = np.clip(u0, u_min, u_max)
 
+      # Pre-build constraint evaluators (stateless, depend only on horizon)
+      collision_c = MovingObstacleAvoidanceConstraints(horizon=horizon)
+      obstacle_c = ObstacleAvoidanceConstraints(horizon=horizon)
+      room_c = RoomConstraints(horizon=horizon) if room_min is not None and room_max is not None else None
+
       def cost(u_flat: np.ndarray) -> float:
          u = u_flat.reshape((horizon, 3))
          u = np.clip(u, u_min, u_max)
@@ -73,22 +78,13 @@ class LocalMPCSolver:
       def constraints(u_flat: np.ndarray) -> np.ndarray:
          u = u_flat.reshape((horizon, 3))
          u = np.clip(u, u_min, u_max)
-         predicted_positions = self._predict_positions(drone, u)
+         predicted_positions, predicted_velocities = self._predict_states(drone, u)
 
          vals = np.array([], dtype=float)
-
-         # Neighbor collision avoidance (no cons_stop -- not known for neighbors)
-         collision_c = MovingObstacleAvoidanceConstraints(horizon=horizon)
-         vals = collision_c.evaluate_single(drone, predicted_positions, neighbor_trajectories, vals)
-
-         # Static obstacles
-         obstacle_c = ObstacleAvoidanceConstraints(horizon=horizon)
-         vals = obstacle_c.evaluate_single(drone, predicted_positions, obstacles, vals)
-
-         # Room constraints
-         if room_min is not None and room_max is not None:
-            room_c = RoomConstraints(horizon=horizon)
-            vals = room_c.evaluate_single(drone, predicted_positions, room_max, room_min, vals)
+         vals = collision_c.evaluate_single(drone, predicted_positions, neighbor_trajectories, vals, pred_vel=predicted_velocities)
+         vals = obstacle_c.evaluate_single(drone, predicted_positions, obstacles, vals, pred_vel=predicted_velocities)
+         if room_c is not None:
+            vals = room_c.evaluate_single(drone, predicted_positions, room_max, room_min, vals, pred_vel=predicted_velocities)
 
          return vals
 
@@ -101,7 +97,7 @@ class LocalMPCSolver:
             options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})
 
       u_opt = np.clip(result.x.reshape((horizon, 3)), u_min, u_max)
-      traj_opt = self._predict_positions(drone, u_opt)
+      traj_opt, _ = self._predict_states(drone, u_opt)
 
       # Check constraint satisfaction
       g = constraints(u_opt.flatten())
@@ -109,20 +105,22 @@ class LocalMPCSolver:
 
       return u_opt, traj_opt, feasible
 
-   def _predict_positions(self, drone: Drone, u: np.ndarray) -> np.ndarray:
-      """Predict position trajectory from state and controls.
+   def _predict_states(self, drone: Drone, u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+      """Predict position and velocity trajectories from state and controls.
 
       :param drone: Drone with initial state and physics model
       :param u: Control sequence (horizon, 3)
-      :return: Predicted position trajectory (horizon, 3)
+      :return: Tuple of (predicted_positions, predicted_velocities), each (horizon, 3)
       """
       horizon = u.shape[0]
 
       x = np.asarray(drone.x, dtype=float).reshape(6)
-      predicted = np.zeros((horizon, 3), dtype=float)
+      positions = np.zeros((horizon, 3), dtype=float)
+      velocities = np.zeros((horizon, 3), dtype=float)
 
       for step in range(horizon):
          x = drone.physics.step(x, u[step])
-         predicted[step] = x[:3]
+         positions[step] = x[:3]
+         velocities[step] = x[3:6]
 
-      return predicted
+      return positions, velocities

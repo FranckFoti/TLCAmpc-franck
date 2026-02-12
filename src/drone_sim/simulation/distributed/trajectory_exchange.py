@@ -54,12 +54,8 @@ class TrajectoryMailbox:
             timestamp=timestamp,
         )
 
-        # Send to all neighbors
-        neighbors = neighbor_graph.get_neighbors(sender_id)
-        for neighbor_id in neighbors:
-            if neighbor_id not in self._inbox:
-                self._inbox[neighbor_id] = {}
-            self._inbox[neighbor_id][sender_id] = message
+        for neighbor_id in neighbor_graph.get_neighbors(sender_id):
+            self._inbox.setdefault(neighbor_id, {})[sender_id] = message
 
     def receive(self, receiver_id: str) -> dict[str, TrajectoryMessage]:
         """Receive all messages for a drone.

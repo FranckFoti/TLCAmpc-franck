@@ -27,9 +27,9 @@ class CentralMPCGlobalCoordinator:
    horizon: int = 5
    room_wall_tolerance: float = 0.0
 
-   # Small lateral acceleration used only for warm-start / initial-guess symmetry breaking.
-   # This helps SLSQP escape the "head-on, perfectly collinear" deadlock where the distance constraint gradient is zero in lateral directions at the
-   # symmetric point.
+   # Small acceleration used for warm-start symmetry breaking.
+   # Helps SLSQP escape head-on collinear deadlocks where the distance
+   # constraint gradient is zero in lateral directions.
    symmetry_break_accel: float = 0.05
 
    max_iter: int = 120

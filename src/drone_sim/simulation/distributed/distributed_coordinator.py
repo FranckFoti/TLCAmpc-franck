@@ -69,19 +69,14 @@ class DistributedMPCCoordinator:
       :return: Dict mapping drone_id to control (3,) for first timestep
       """
       # Identify which drones to optimize (must have central_cost interface)
-      idx_opt = {i for i, drone in enumerate(drones) if _has_central_cost(drone.controller)}
+      opt_drones = [d for d in drones if _has_central_cost(d.controller)]
 
-      # If nothing to optimize, return empty
-      if not idx_opt:
+      if not opt_drones:
          return {}
 
-      opt_ids = [drones[i].drone_id for i in idx_opt]
-
-      # Build lookup dicts
-      idx_by_id = {drones[i].drone_id: i for i in idx_opt}
+      opt_ids = [d.drone_id for d in opt_drones]
+      drone_by_id = {d.drone_id: d for d in opt_drones}
       safety_by_id = {d.drone_id: float(d.safety_zone) for d in drones}
-
-      n = len(drones)
 
       # 1. Update neighbor graph from current positions
       positions = {d.drone_id: np.asarray(d.x, dtype=float)[:3] for d in drones}
@@ -94,10 +89,10 @@ class DistributedMPCCoordinator:
       trajectories, local_solvers = self.init_trajectories(drones)
 
       # Add static trajectories for non-optimized drones (needed for neighbor pairs)
-      for i in range(n):
-         if i not in idx_opt:
-            pos = np.asarray(drones[i].x, dtype=float)[:3]
-            trajectories[drones[i].drone_id] = np.tile(pos, (self.horizon, 1))
+      for drone in drones:
+         if drone.drone_id not in drone_by_id:
+            pos = np.asarray(drone.x, dtype=float)[:3]
+            trajectories[drone.drone_id] = np.tile(pos, (self.horizon, 1))
 
       # 4. ADMM iteration loop
       converged = False
@@ -126,7 +121,7 @@ class DistributedMPCCoordinator:
          if self.gauss_seidel:
             # Gauss-Seidel: immediate updates after each drone solves
             for drone_id in drone_order:
-               i = idx_by_id[drone_id]
+               drone = drone_by_id[drone_id]
                solver = local_solvers[drone_id]
 
                # Get neighbor trajectories from mailbox (includes any updates)
@@ -136,13 +131,12 @@ class DistributedMPCCoordinator:
                   for sid, msg in messages.items()
                }
 
-               # Get warm-start from previous iteration
+               # Get warm-start from previous timestep (only on first ADMM iteration)
                u_prev = None
                if drone_id in self._u_prev and iteration == 0:
                   u_prev = np.concatenate([self._u_prev[drone_id][1:], self._u_prev[drone_id][-1:]], axis=0)
 
-               # Solve local MPC
-               u_opt, traj_opt, success = solver.solve(drone=drones[i], neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
+               u_opt, traj_opt, success = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
                                                        room_max=room_max, u_prev=u_prev)
 
                # Immediate update (Gauss-Seidel style)
@@ -154,7 +148,7 @@ class DistributedMPCCoordinator:
                                        neighbor_graph=self._neighbor_graph)
          else:
             # Jacobi: all drones use stale data, update all at once
-            trajectories, controls = self._jacobi(drone_order, drones, local_solvers, iteration, obstacles, room_min, room_max)
+            trajectories, controls = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max)
 
          # 4d-e. Update z and lambda for all neighbor pairs
          for pair in neighbor_pairs:
@@ -195,37 +189,33 @@ class DistributedMPCCoordinator:
 
       return result
 
-   def _jacobi(self, drone_order: list[str], drones: list[Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
-               obstacles: list[tuple[np.ndarray, float]] | None = None, room_min: np.ndarray | None = None, room_max: np.ndarray | None = None) -> tuple[
-      dict[str, np.ndarray], dict[str, np.ndarray]]:
-      # Jacobi: all drones use stale data, update all at once
+   def _jacobi(self, drone_order: list[str], drone_by_id: dict[str, Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
+               obstacles: list[tuple[np.ndarray, float]] | None = None, room_min: np.ndarray | None = None,
+               room_max: np.ndarray | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+      """Jacobi update: all drones solve using stale neighbor data, then update all at once."""
       new_trajectories: dict[str, np.ndarray] = {}
       new_controls: dict[str, np.ndarray] = {}
 
-      drone_order_set = set(drone_order)
-      for drone in drones:
-         if drone.drone_id not in drone_order_set:
-            continue
-         solver = local_solvers[drone.drone_id]
+      for drone_id in drone_order:
+         drone = drone_by_id[drone_id]
+         solver = local_solvers[drone_id]
 
-         # Get neighbor trajectories from mailbox
-         messages = self._mailbox.receive(drone.drone_id)
+         messages = self._mailbox.receive(drone_id)
          neighbor_trajectories = {
             sid: (msg.trajectory, msg.safety_zone)
             for sid, msg in messages.items()
          }
 
-         # Get warm-start from previous iteration
+         # Get warm-start from previous timestep (only on first ADMM iteration)
          u_prev = None
-         if drone.drone_id in self._u_prev and iteration == 0:
-            u_prev = np.concatenate([self._u_prev[drone.drone_id][1:], self._u_prev[drone.drone_id][-1:]], axis=0)
+         if drone_id in self._u_prev and iteration == 0:
+            u_prev = np.concatenate([self._u_prev[drone_id][1:], self._u_prev[drone_id][-1:]], axis=0)
 
-         # Solve local MPC
          u_opt, traj_opt, success = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
                                                  room_max=room_max, u_prev=u_prev)
 
-         new_trajectories[drone.drone_id] = traj_opt
-         new_controls[drone.drone_id] = u_opt
+         new_trajectories[drone_id] = traj_opt
+         new_controls[drone_id] = u_opt
 
       return new_trajectories, new_controls
 
@@ -259,7 +249,7 @@ class DistributedMPCCoordinator:
                u0 = u0[: self.horizon]
 
          # Predict trajectory from controls
-         trajectories[drone.drone_id] = local_solvers[drone.drone_id]._predict_positions(drone, u0)
+         trajectories[drone.drone_id] = local_solvers[drone.drone_id]._predict_states(drone, u0)[0]
       return trajectories, local_solvers
 
    def get_last_iteration_count(self) -> int:

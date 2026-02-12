@@ -13,7 +13,8 @@ import pytest
 import numpy as np
 from numpy.testing import assert_array_almost_equal, assert_array_equal
 
-from drone_sim.controllers.central_cost import CentralMPCAgent, as_diagonal
+from drone_sim.controllers.central_cost import AdaptiveMPCAgent, CentralMPCAgent, as_diagonal
+from drone_sim.domain.registry import CONTROLLERS
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 
@@ -331,3 +332,103 @@ class TestCentralMPCAgentEdgeCases:
       assert guess[0, 0] < 0
       assert guess[0, 1] < 0
       assert guess[0, 2] < 0
+
+
+class TestAdaptiveMPCAgent:
+   """Tests for AdaptiveMPCAgent velocity-penalized cost model."""
+
+   def test_init_default_lambda_vel(self):
+      """Test default lambda_vel=1.0 and inherited fields."""
+      agent = AdaptiveMPCAgent(dt=0.1)
+      assert agent.lambda_vel == 1.0
+      assert agent.horizon == 12
+      assert agent.q_pos == (8.0, 8.0, 8.0)
+      assert agent.q_vel == (0.5, 0.5, 0.5)
+      assert agent.r_u == (0.2, 0.2, 0.2)
+
+   def test_init_custom_lambda_vel(self):
+      """Test custom lambda_vel is stored."""
+      agent = AdaptiveMPCAgent(dt=0.1, lambda_vel=2.5)
+      assert agent.lambda_vel == 2.5
+
+   def test_cost_higher_than_base_with_velocity(self):
+      """Test adaptive cost > base cost when velocity is nonzero."""
+      base = CentralMPCAgent(dt=0.1, horizon=5)
+      adaptive = AdaptiveMPCAgent(dt=0.1, horizon=5, lambda_vel=1.0)
+
+      u_seq = np.ones((5, 3)) * 1.0
+      drone_base = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=base)
+      drone_adaptive = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=adaptive)
+
+      cost_base = base.central_cost(u_seq, drone_base)
+      cost_adaptive = adaptive.central_cost(u_seq, drone_adaptive)
+
+      assert cost_adaptive > cost_base
+
+   def test_cost_equals_base_at_zero_velocity(self):
+      """Test cost matches base when drone is at target with zero velocity and zero controls."""
+      base = CentralMPCAgent(dt=0.1, horizon=5)
+      adaptive = AdaptiveMPCAgent(dt=0.1, horizon=5, lambda_vel=1.0)
+
+      u_seq = np.zeros((5, 3))
+      drone_base = _make_drone(x=[5.0, 5.0, 5.0, 0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0], controller=base)
+      drone_adaptive = _make_drone(x=[5.0, 5.0, 5.0, 0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0], controller=adaptive)
+
+      cost_base = base.central_cost(u_seq, drone_base)
+      cost_adaptive = adaptive.central_cost(u_seq, drone_adaptive)
+
+      assert cost_adaptive == pytest.approx(cost_base)
+
+   def test_cost_increases_with_lambda_vel(self):
+      """Test higher lambda_vel produces higher cost."""
+      low = AdaptiveMPCAgent(dt=0.1, horizon=5, lambda_vel=0.5)
+      high = AdaptiveMPCAgent(dt=0.1, horizon=5, lambda_vel=5.0)
+
+      u_seq = np.ones((5, 3)) * 1.0
+      drone_low = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=low)
+      drone_high = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=high)
+
+      cost_low = low.central_cost(u_seq, drone_low)
+      cost_high = high.central_cost(u_seq, drone_high)
+
+      assert cost_high > cost_low
+
+   def test_cost_returns_scalar(self):
+      """Test return type is float."""
+      agent = AdaptiveMPCAgent(dt=0.1, horizon=5)
+      u_seq = np.ones((5, 3))
+      drone = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=agent)
+
+      cost = agent.central_cost(u_seq, drone)
+      assert isinstance(cost, float)
+
+   def test_registered_as_mpc_agent_adaptive(self):
+      """Test CONTROLLERS registry contains 'mpc_agent_adaptive'."""
+      assert "mpc_agent_adaptive" in CONTROLLERS
+      assert CONTROLLERS["mpc_agent_adaptive"] is AdaptiveMPCAgent
+
+   def test_inherits_initial_guess(self):
+      """Test central_initial_guess returns same shape/values as parent."""
+      base = CentralMPCAgent(dt=0.1, horizon=5)
+      adaptive = AdaptiveMPCAgent(dt=0.1, horizon=5)
+
+      drone_base = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=base)
+      drone_adaptive = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=adaptive)
+
+      guess_base = base.central_initial_guess(drone_base)
+      guess_adaptive = adaptive.central_initial_guess(drone_adaptive)
+
+      assert_array_almost_equal(guess_adaptive, guess_base)
+
+   def test_inherits_control(self):
+      """Test control() returns same result as parent."""
+      base = CentralMPCAgent(dt=0.1, horizon=5)
+      adaptive = AdaptiveMPCAgent(dt=0.1, horizon=5)
+
+      drone_base = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=base)
+      drone_adaptive = _make_drone(x=np.zeros(6), target=[5.0, 5.0, 5.0], controller=adaptive)
+
+      u_base = base.control(drone_base, [], [])
+      u_adaptive = adaptive.control(drone_adaptive, [], [])
+
+      assert_array_almost_equal(u_adaptive, u_base)
