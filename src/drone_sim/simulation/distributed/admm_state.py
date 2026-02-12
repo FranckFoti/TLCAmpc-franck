@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np
 
-from drone_sim.simulation.neighbor_graph import NeighborGraph
+from drone_sim.simulation.distributed.neighbor_graph import NeighborGraph
 
 
 @dataclass
@@ -80,18 +80,13 @@ class ADMMState:
         z_unproj = diff + lam / self.rho
 
         # Project to satisfy ||z|| >= min_dist at each timestep
-        z_new = np.zeros_like(z_unproj)
-        for k in range(self.horizon):
-            norm = float(np.linalg.norm(z_unproj[k]))
-            if norm < min_dist and norm > 1e-10:
-                # Scale to min_dist in same direction
-                z_new[k] = z_unproj[k] * (min_dist / norm)
-            elif norm < 1e-10:
-                # Zero difference - arbitrary direction
-                z_new[k] = np.array([min_dist, 0.0, 0.0])
-            else:
-                # Already satisfies constraint
-                z_new[k] = z_unproj[k]
+        norms = np.linalg.norm(z_unproj, axis=1, keepdims=True)  # (H, 1)
+        near_zero = norms.ravel() < 1e-10
+        needs_scale = (~near_zero) & (norms.ravel() < min_dist)
+
+        z_new = z_unproj.copy()
+        z_new[near_zero] = np.array([min_dist, 0.0, 0.0])
+        z_new[needs_scale] = z_unproj[needs_scale] * (min_dist / norms[needs_scale])
 
         self._z[canonical] = z_new
 
@@ -119,8 +114,7 @@ class ADMMState:
         diff = traj_i - traj_j
         z = self._z[canonical]
 
-        # Dual update
-        self._lambdas[canonical] = self._lambdas[canonical] + self.rho * (diff - z)
+        self._lambdas[canonical] += self.rho * (diff - z)
 
     def get_consensus_term(
         self,
@@ -164,12 +158,11 @@ class ADMMState:
             residual = diff - z
 
             # Sign depends on position in canonical pair
+            term = lam + self.rho * residual
             if drone_id == canonical[0]:
-                # drone_id is i: gradient is +lambda + rho * residual
-                result = result + lam + self.rho * residual
+                result += term
             else:
-                # drone_id is j: gradient is -lambda - rho * residual
-                result = result - lam - self.rho * residual
+                result -= term
 
         return result
 

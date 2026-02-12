@@ -14,7 +14,7 @@ from PIL import Image
 
 from drone_sim.api.render import render_png
 from drone_sim.simulation.simulator import Simulator
-from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
+from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 from tools import _build_scenario, _COLOR_BY_DRONE_INDEX, _all_drones_reached_destination, CoordinatorType
 
 

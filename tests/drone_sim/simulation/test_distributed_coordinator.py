@@ -5,7 +5,7 @@ from drone_sim.controllers.central_cost import CentralMPCAgent
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.domain.registry import COORDINATORS
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
-from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
+from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 
 
 def _make_drone(
@@ -42,7 +42,7 @@ class TestDistributedCoordinatorRegistration:
     def test_coordinator_registration(self):
         """Verify "dmpc_admm" is in COORDINATORS registry."""
         # Import triggers registration
-        from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator  # noqa: F401
+        from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator  # noqa: F401
 
         assert "dmpc_admm" in COORDINATORS
         assert COORDINATORS["dmpc_admm"] is DistributedMPCCoordinator

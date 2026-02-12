@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from drone_sim.simulation.admm_state import ADMMState
-from drone_sim.simulation.neighbor_graph import NeighborGraph
+from drone_sim.simulation.distributed.admm_state import ADMMState
+from drone_sim.simulation.distributed.neighbor_graph import NeighborGraph
 
 
 class TestADMMStateInitialization:

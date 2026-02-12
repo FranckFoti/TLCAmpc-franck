@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from drone_sim.simulation.local_mpc import LocalMPCSolver
+from drone_sim.simulation.distributed.local_mpc import LocalMPCSolver
 from drone_sim.controllers.central_cost import CentralMPCAgent
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics

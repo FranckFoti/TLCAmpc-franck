@@ -92,7 +92,7 @@ class TestAsyncADMMDeadlockPrevention:
 
     def test_random_ordering_varies_between_iterations(self):
         """Drone solving order should vary across ADMM iterations."""
-        from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
+        from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 
         coord = DistributedMPCCoordinator(dt=0.1, gauss_seidel=True)
 
@@ -101,14 +101,14 @@ class TestAsyncADMMDeadlockPrevention:
 
     def test_gauss_seidel_disabled_uses_jacobi(self):
         """When gauss_seidel=False, should use Jacobi (all at once) updates."""
-        from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
+        from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 
         coord = DistributedMPCCoordinator(dt=0.1, gauss_seidel=False)
         assert coord.gauss_seidel is False
 
     def test_priority_ordering_method_exists(self):
         """Coordinator should have _compute_priority method."""
-        from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
+        from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 
         coord = DistributedMPCCoordinator(dt=0.1)
         assert hasattr(coord, "_compute_priority")

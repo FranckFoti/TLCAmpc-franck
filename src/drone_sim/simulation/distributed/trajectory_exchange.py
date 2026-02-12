@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np
 
-from drone_sim.simulation.neighbor_graph import NeighborGraph
+from drone_sim.simulation.distributed.neighbor_graph import NeighborGraph
 
 
 @dataclass

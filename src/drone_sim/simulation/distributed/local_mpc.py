@@ -47,8 +47,7 @@ class LocalMPCSolver:
       controller = drone.controller
       obstacles = obstacles or []
 
-      u_min = drone.bounds()[0]
-      u_max = drone.bounds()[1]
+      u_min, u_max = drone.bounds()
       horizon = self.horizon
 
       # Initial guess
@@ -94,10 +93,8 @@ class LocalMPCSolver:
          return vals
 
       # Build bounds
-      bounds = []
-      for _ in range(horizon):
-         for axis in range(3):
-            bounds.append((float(u_min[axis]), float(u_max[axis])))
+      axis_bounds = [(float(u_min[a]), float(u_max[a])) for a in range(3)]
+      bounds = axis_bounds * horizon
 
       # Optimize
       result = minimize(cost, u0.flatten(), method="SLSQP", bounds=bounds, constraints={"type": "ineq", "fun": constraints},

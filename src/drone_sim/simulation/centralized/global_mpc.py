@@ -6,19 +6,19 @@ import numpy as np
 
 from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints, VelocityConstraints)
 from drone_sim.domain.drone import Drone
-from drone_sim.domain.registry import register_coordinator
 
 
 def _has_central_cost(ctrl: object) -> bool:
    return all(hasattr(ctrl, name) for name in ("central_cost", "central_initial_guess", "horizon"))
 
 
-@register_coordinator("mpc_central")
 @dataclass
-class CentralMPCGlobalCoordinator:
-   """Central coordinator for mixed controllers.
+class GlobalMPCSolver:
+   """Global MPC solver for multi-drone joint optimization.
 
-   Optimizes only drones whose controller implements the central-cost interface.
+   Handles the SLSQP optimization core: cost assembly, constraint evaluation,
+   state prediction, and symmetry breaking. Analogous to LocalMPCSolver on the
+   distributed side.
 
    Safety constraints use owner-only rule:
        dist(owner, other) >= owner.safety_zone + other.safety_buffer
@@ -26,18 +26,10 @@ class CentralMPCGlobalCoordinator:
 
    dt: float
    horizon: int = 5
-   room_wall_tolerance: float = 0.0
-
-   # Small lateral acceleration used only for warm-start / initial-guess symmetry breaking.
-   # This helps SLSQP escape the "head-on, perfectly collinear" deadlock where the distance constraint gradient is zero in lateral directions at the
-   # symmetric point.
-   symmetry_break_accel: float = 0.05
-
    max_iter: int = 120
    f_tol: float = 1e-3
-
-   def __post_init__(self) -> None:
-      self._u_prev: dict[str, np.ndarray] = {}
+   room_wall_tolerance: float = 0.0
+   symmetry_break_accel: float = 0.05
 
    def _pack(self, u: np.ndarray) -> np.ndarray:
       return np.asarray(u, dtype=float).reshape(-1)
@@ -54,10 +46,6 @@ class CentralMPCGlobalCoordinator:
             new_states[i, k] = x
       return new_states
 
-   def _predict_positions(self, drones: list[Drone], u: np.ndarray) -> np.ndarray:
-      predicted_states = self._predict_states(drones, u)
-      return predicted_states[:, :, :3]
-
    def _apply_symmetry_break(self, u0: np.ndarray) -> np.ndarray:
       """Apply a tiny deterministic perturbation to break perfect symmetry.
 
@@ -66,7 +54,7 @@ class CentralMPCGlobalCoordinator:
           drone.
       """
 
-      eps = float(self.symmetry_break_accel)
+      eps = self.symmetry_break_accel
       if eps <= 0.0:
          return u0
 
@@ -74,7 +62,7 @@ class CentralMPCGlobalCoordinator:
       if num_drones < 2:
          return u0
 
-      u = np.asarray(u0, dtype=float).copy()
+      u = u0.copy()
 
       # For each optimized drone i, add a tiny 3D bias vector whose sign alternates with i.
       # This ensures that even if the initial guess sits perfectly on z=0 (and symmetric in x/y), the optimizer sees a non-trivial search direction in all axes.
@@ -91,24 +79,79 @@ class CentralMPCGlobalCoordinator:
 
       return u
 
-   def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None = None,
-         room_max: np.ndarray | None = None) -> dict[str, np.ndarray]:
+   def _cost(self, u_flat: np.ndarray, *, drones: list[Drone], controllers: list[object], clip_u) -> float:
+      u = clip_u(self._unpack(u_flat, len(drones)))
+      return float(sum(
+         ctrl.central_cost(u[i], drone)  # type: ignore[attr-defined]
+         for i, (drone, ctrl) in enumerate(zip(drones, controllers))
+      ))
 
+   def _constraints(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None,
+                    room_max: np.ndarray | None) -> np.ndarray:
+      """Inequality constraints c(u) >= 0.
+
+      Delegates to constraint classes for:
+      - Drone-to-drone collision avoidance (with cons_stop)
+      - Static obstacle avoidance
+      - Room boundary constraints (with wall_tolerance)
+      - Velocity magnitude constraints
+      """
+      num_drones = len(drones)
+      u = self._unpack(u_flat, num_drones)
+      predicted_states = self._predict_states(drones, u)
+      predicted_positions = predicted_states[:, :, :3]
+      predicted_velocities = predicted_states[:, :, 3:6]
+
+      pred_pos = {drone.drone_id: predicted_positions[i] for i, drone in enumerate(drones)}
+      vals = np.array([], dtype=float)
+
+      # Drone-to-drone collision avoidance (i<j pairs, includes cons_stop)
+      collision_c = MovingObstacleAvoidanceConstraints(horizon=self.horizon)
+      vals = collision_c.evaluate_multi(drones, pred_pos, vals)
+
+      # Static obstacle avoidance
+      obstacle_c = ObstacleAvoidanceConstraints(horizon=self.horizon)
+      vals = obstacle_c.evaluate_multi(drones, pred_pos, obstacles, vals)
+
+      # Room boundary constraints (per-face, with wall_tolerance)
+      if room_min is not None and room_max is not None:
+         room_c = RoomConstraints(horizon=self.horizon, wall_tolerance=self.room_wall_tolerance)
+         vals = room_c.evaluate_multi(drones, pred_pos, room_max, room_min, vals)
+
+      # Velocity magnitude constraints
+      velocity_c = VelocityConstraints(horizon=self.horizon)
+      vals = velocity_c.evaluate_multi(drones, predicted_velocities, vals)
+
+      return vals
+
+   def solve(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None = None,
+             room_max: np.ndarray | None = None, u_prev: dict[str, np.ndarray] | None = None
+   ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+      """Solve the global MPC optimization for all drones.
+
+      :param drones: List of Drone objects (only those with central_cost are optimized).
+      :param obstacles: List of (center, radius) static obstacles.
+      :param room_min: Room lower bounds (3,) or None.
+      :param room_max: Room upper bounds (3,) or None.
+      :param u_prev: Previous control sequences keyed by drone_id for warm-start.
+      :return: Tuple of (controls_dict, u_sequences_dict) where:
+          - controls_dict: {drone_id: first_step_control (3,)}
+          - u_sequences_dict: {drone_id: full_u_sequence (horizon, 3)}
+      """
       from scipy.optimize import minimize
 
-      # Extract values from Drone objects
-      drone_ids = [d.drone_id for d in drones]
       controllers = [d.controller for d in drones]
 
-      n = len(drones)
-      idx_opt = [i for i in range(n) if _has_central_cost(controllers[i])]
+      idx_opt = [i for i in range(len(drones)) if _has_central_cost(controllers[i])]
 
       # If nothing to optimize, return empty.
       if not idx_opt:
-         return {}
+         return {}, {}
 
-      opt_ids = [drone_ids[i] for i in idx_opt]
+      opt_ids = [drones[i].drone_id for i in idx_opt]
       num_optimized = len(idx_opt)
+
+      u_prev = u_prev or {}
 
       # Per-optimized-drone bounds (from physics via Drone)
       bounds_list = [drones[i].bounds() for i in idx_opt]
@@ -120,15 +163,15 @@ class CentralMPCGlobalCoordinator:
 
       # Warm-start: shift previous solution if available
       u0 = np.zeros((num_optimized, self.horizon, 3), dtype=float)
-      have_prev = all(did in self._u_prev for did in opt_ids)
+      have_prev = all(did in u_prev for did in opt_ids)
       if have_prev:
-         prev = np.stack([self._u_prev[did] for did in opt_ids], axis=0)
+         prev = np.stack([u_prev[did] for did in opt_ids], axis=0)
          u0 = np.concatenate([prev[:, 1:, :], prev[:, -1:, :]], axis=1)
          u0 = self._apply_symmetry_break(u0)
       else:
          # Build per-drone initial guesses and backtrack to feasibility.
          u_guess = []
-         for j, i in enumerate(idx_opt):
+         for i in idx_opt:
             ug = controllers[i].central_initial_guess(drones[i])  # type: ignore[attr-defined]
             ug = np.asarray(ug, dtype=float).reshape((-1, 3))
 
@@ -164,9 +207,10 @@ class CentralMPCGlobalCoordinator:
       cons = {"type": "ineq", "fun": lambda u_flat: self._constraints(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)}
 
       opt_drones = [drones[i] for i in idx_opt]
+      opt_controllers = [controllers[i] for i in idx_opt]
 
-      res = minimize(lambda u_flat: self._cost(u_flat, drones=opt_drones, controllers=[controllers[i] for i in idx_opt], clip_u=clip_u), self._pack(u0),
-            method="SLSQP", bounds=bounds, constraints=[cons], options={"maxiter": int(self.max_iter), "ftol": float(self.f_tol), "disp": False})
+      res = minimize(lambda u_flat: self._cost(u_flat, drones=opt_drones, controllers=opt_controllers, clip_u=clip_u), self._pack(u0),
+            method="SLSQP", bounds=bounds, constraints=[cons], options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})
 
       # Treat optimizer failures or strongly violated constraints as fatal instead of silently continuing with an invalid trajectory.
       # This ensures we do not "find" a route when the constraints (e.g. walls/obstacles) make the problem infeasible.
@@ -185,53 +229,9 @@ class CentralMPCGlobalCoordinator:
          raise RuntimeError(f"CentralMPCGlobalCoordinator produced infeasible controls: min constraint margin {min_margin:.3e} < 0.")
 
       u_opt = clip_u(self._unpack(res.x, num_optimized))
-      for did, u_seq in zip(opt_ids, u_opt, strict=True):
-         self._u_prev[did] = u_seq
 
-      return {did: u_opt[k, 0].copy() for k, did in enumerate(opt_ids)}
+      # Build return dicts
+      controls_dict = {did: u_opt[k, 0].copy() for k, did in enumerate(opt_ids)}
+      u_sequences_dict = {did: u_opt[k] for k, did in enumerate(opt_ids)}
 
-   def _cost(self, u_flat: np.ndarray, *, drones: list[Drone], controllers: list[object], clip_u) -> float:
-      u = clip_u(self._unpack(u_flat, len(drones)))
-      total = 0.0
-
-      for i in range(len(drones)):
-         total += float(controllers[i].central_cost(u[i], drones[i]))  # type: ignore[attr-defined]
-      return float(total)
-
-   def _constraints(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None,
-                    room_max: np.ndarray | None) -> np.ndarray:
-      """Inequality constraints c(u) >= 0.
-
-      Delegates to constraint classes for:
-      - Drone-to-drone collision avoidance (with cons_stop)
-      - Static obstacle avoidance
-      - Room boundary constraints (with wall_tolerance)
-      - Velocity magnitude constraints
-      """
-      num_drones = len(drones)
-      u = self._unpack(u_flat, num_drones)
-      predicted_states = self._predict_states(drones, u)
-      predicted_positions = predicted_states[:, :, :3]
-      predicted_velocities = predicted_states[:, :, 3:6]
-
-      pred_pos = {drones[i].drone_id: predicted_positions[i] for i in range(num_drones)}
-      vals = np.array([], dtype=float)
-
-      # Drone-to-drone collision avoidance (i<j pairs, includes cons_stop)
-      collision_c = MovingObstacleAvoidanceConstraints(horizon=self.horizon)
-      vals = collision_c.evaluate_multi(drones, pred_pos, vals)
-
-      # Static obstacle avoidance
-      obstacle_c = ObstacleAvoidanceConstraints(horizon=self.horizon)
-      vals = obstacle_c.evaluate_multi(drones, pred_pos, obstacles, vals)
-
-      # Room boundary constraints (per-face, with wall_tolerance)
-      if room_min is not None and room_max is not None:
-         room_c = RoomConstraints(horizon=self.horizon, wall_tolerance=self.room_wall_tolerance)
-         vals = room_c.evaluate_multi(drones, pred_pos, room_max, room_min, vals)
-
-      # Velocity magnitude constraints
-      velocity_c = VelocityConstraints(horizon=self.horizon)
-      vals = velocity_c.evaluate_multi(drones, predicted_velocities, vals)
-
-      return vals
+      return controls_dict, u_sequences_dict

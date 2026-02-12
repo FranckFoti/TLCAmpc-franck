@@ -64,8 +64,6 @@ class Simulator:
       # Ensure implementations are registered
       from drone_sim.controllers import central_cost as _central_cost  # noqa: F401
       from drone_sim.physics import linear_kinematics as _  # noqa: F401
-      from drone_sim.simulation import coordinator as _coord  # noqa: F401
-      from drone_sim.simulation import distributed_coordinator as _dmpc  # noqa: F401
 
       # Build physics lookup: supports single PhysicsSpec or list of PhysicsSpec
       physics_specs = cfg.physics if isinstance(cfg.physics, list) else [cfg.physics]

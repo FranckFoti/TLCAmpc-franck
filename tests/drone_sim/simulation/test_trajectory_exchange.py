@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from drone_sim.simulation.trajectory_exchange import TrajectoryMessage, TrajectoryMailbox
-from drone_sim.simulation.neighbor_graph import NeighborGraph
+from drone_sim.simulation.distributed.trajectory_exchange import TrajectoryMessage, TrajectoryMailbox
+from drone_sim.simulation.distributed.neighbor_graph import NeighborGraph
 
 
 class TestTrajectoryMessage:

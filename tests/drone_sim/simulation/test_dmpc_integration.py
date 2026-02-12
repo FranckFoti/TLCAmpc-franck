@@ -22,7 +22,7 @@ from drone_sim.domain.config import (
     RoomConfig,
     ScenarioConfig,
 )
-from drone_sim.simulation.distributed_coordinator import DistributedMPCCoordinator
+from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 from drone_sim.simulation.simulator import Simulator
 
 
@@ -344,7 +344,7 @@ class TestDMPCVsCentralComparison:
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            for _ in range(80):
+            for _ in range(100): # distributed needs some more steps
                 sim_central.step()
                 sim_dmpc.step()
 

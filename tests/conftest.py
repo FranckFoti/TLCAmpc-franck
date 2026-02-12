@@ -12,7 +12,7 @@ from drone_sim.controllers.central_cost import CentralMPCAgent
 from drone_sim.domain.config import (DroneConfig, ScenarioConfig, PhysicsSpec, ControllerSpec, ObstacleConfig, RoomConfig)
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
-from drone_sim.simulation.coordinator import CentralMPCGlobalCoordinator
+from drone_sim.simulation.centralized.coordinator import CentralMPCGlobalCoordinator
 from drone_sim.simulation.simulator import Simulator
 
 
