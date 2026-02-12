@@ -41,6 +41,7 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
                neighbor_links: list[tuple[int, int]] | None = None,
                admm_iteration_count: int | None = None,
                admm_converged: bool | None = None,
+               safety_alphas: list[float] | None = None,
                width: int = 900,
                height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0) -> bytes:
    """Render a 3D scene to PNG bytes.
@@ -81,7 +82,8 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
                     label=f"drone-{i + 1}")
 
          # Safety zones as wireframe spheres.
-         _draw_sphere_wireframe(ax, pos, float(rz), color=c_safety, alpha=0.8, lw=0.6)
+         alpha_val = safety_alphas[i] if safety_alphas else 0.8
+         _draw_sphere_wireframe(ax, pos, float(rz), color=c_safety, alpha=alpha_val, lw=0.6)
 
          # Trace as a dotted/pointed line + a small arrow.
          if trace and len(trace) >= 2:

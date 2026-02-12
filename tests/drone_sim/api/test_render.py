@@ -341,6 +341,21 @@ class TestRenderPng:
 
       assert isinstance(result, bytes)
 
+   def test_render_png_with_safety_alphas(self, minimal_render_kwargs):
+      """Test render_png accepts and uses safety_alphas parameter."""
+      minimal_render_kwargs["drone_positions"] = [np.array([1.0, 1.0, 1.0]), np.array([5.0, 5.0, 5.0])]
+      minimal_render_kwargs["drone_radii"] = [0.2, 0.3]
+      minimal_render_kwargs["drone_safety_zones"] = [1.0, 1.5]
+      minimal_render_kwargs["drone_colors"] = ["tab:blue", "tab:orange"]
+      minimal_render_kwargs["safety_colors"] = ["tab:cyan", "tab:red"]
+      minimal_render_kwargs["trace_colors"] = ["blue", "orange"]
+      minimal_render_kwargs["drone_traces"] = [[], []]
+
+      result = render_png(**minimal_render_kwargs, safety_alphas=[0.3, 1.0])
+
+      assert isinstance(result, bytes)
+      assert result[:8] == b"\x89PNG\r\n\x1a\n"
+
    def test_render_png_obstacle_at_boundary(self, minimal_render_kwargs):
       """Test render_png with obstacle at room boundary."""
       minimal_render_kwargs["obstacles"] = [(np.array([10.0, 10.0, 10.0]), 0.5)]

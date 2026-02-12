@@ -272,6 +272,7 @@ class Simulator:
                "p_ref": d.route.current_ref().tolist(),
                "radius": d.radius,
                "safety_zone": d.safety_zone,
+               "adaptive_safety_radius": d.compute_adaptive_radius(d.velocity()) if d.is_adaptive else None,
                "drone_color": _color_to_json(d.color),
                "safety_color": _color_to_json(d.safety_color),
                "trace_color": _color_to_json(d.trace_color),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import Response
@@ -66,8 +67,18 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
 
    traces = [[] if trace_len == 0 else _sim.traces.get(d.drone_id, [])[-trace_len:] for d in _sim.drones]
 
-   # Use fixed safety zones as defined on each drone (no velocity-dependent adjustment).
-   safety_zones = [float(d.safety_zone) for d in _sim.drones]
+   # Compute per-drone safety zone radius and wireframe alpha.
+   # compute_adaptive_radius handles both adaptive (velocity-dependent) and fixed drones.
+   safety_zones: list[float] = []
+   safety_alphas: list[float] = []
+   for d in _sim.drones:
+       vel = d.velocity()
+       safety_zones.append(float(d.compute_adaptive_radius(vel)))
+       if d.is_adaptive:
+           speed_ratio = min(float(np.linalg.norm(vel)) / d.v_max, 1.0) if d.v_max > 0 else 0.0
+           safety_alphas.append(0.3 + 0.7 * speed_ratio)
+       else:
+           safety_alphas.append(0.8)
 
    # Extract ADMM visualization data if using distributed coordinator
    neighbor_links = None
@@ -94,6 +105,7 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
                     neighbor_links=neighbor_links,
                     admm_iteration_count=admm_iteration_count,
                     admm_converged=admm_converged,
+                    safety_alphas=safety_alphas,
                     width=width, height=height, dpi=dpi,
                     elev=elev, azim=azim)
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from string import Template
 from typing import Any, NoReturn
 
+import numpy as np
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -98,7 +99,16 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
 
       # Prepare the same inputs that the /render handler would use.
       traces = [[] if trace_len == 0 else sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones]
-      safety_zones = [float(d.safety_zone) for d in sim.drones]
+      safety_zones: list[float] = []
+      safety_alphas: list[float] = []
+      for d in sim.drones:
+          vel = d.velocity()
+          safety_zones.append(float(d.compute_adaptive_radius(vel)))
+          if d.is_adaptive:
+              speed_ratio = min(float(np.linalg.norm(vel)) / d.v_max, 1.0) if d.v_max > 0 else 0.0
+              safety_alphas.append(0.3 + 0.7 * speed_ratio)
+          else:
+              safety_alphas.append(0.8)
 
       is_distributed = isinstance(sim.coordinator, DistributedMPCCoordinator)
       neighbor_links = None # sim.coordinator.get_neighbor_pairs() if is_distributed else None
@@ -111,6 +121,7 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
             drone_traces=traces, obstacles=sim.obstacles,
             step_count=sim.step_count, compute_time_s=sim.compute_time_s,
             neighbor_links=neighbor_links, admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
+            safety_alphas=safety_alphas,
             width=width, height=height, dpi=dpi, elev=elev, azim=azim
       )
 

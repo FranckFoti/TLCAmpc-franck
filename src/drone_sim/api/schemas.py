@@ -27,6 +27,7 @@ class DroneState(BaseModel):
    p_ref: list[float] = Field(..., min_length=3, max_length=3)
    radius: float
    safety_zone: float
+   adaptive_safety_radius: float | None = None
 
    drone_color: str | list[float]
    safety_color: str | list[float]
