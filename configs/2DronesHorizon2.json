@@ -23,8 +23,8 @@
   "drones": [
     {
       "drone_id": "drone-1",
-      "start": [0.0, -2.4, 0.0],
-      "target": [0.0, 2.4, 0.0],
+      "start": [0.0, -1.49, 0.0],
+      "target": [0.0, 1.49, 0.0],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -33,8 +33,8 @@
     },
     {
       "drone_id": "drone-2",
-      "start": [0.0, 2.4, 0.0],
-      "target": [0.0, -2.4, 0.0],
+      "start": [0.0, 1.49, 0.0],
+      "target": [0.0, -1.49, 0.0],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,

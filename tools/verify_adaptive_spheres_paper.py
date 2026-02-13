@@ -113,6 +113,7 @@ def _run_simulation(path: Path, steps: int, *, enhanced: bool = False) -> RunRes
 
    If enhanced=True, also collect per-step metrics for comparison mode.
    """
+   t_start = time.perf_counter()
    scenario = _load_scenario(path)
    sim = Simulator.from_config(scenario)
    result = RunResult(config_name=path.name)
@@ -139,6 +140,8 @@ def _run_simulation(path: Path, steps: int, *, enhanced: bool = False) -> RunRes
       dt = time.perf_counter() - t0
       result.step_times.append(dt)
       result.total_solve_time += dt
+      if time.perf_counter() - t_start > 300:
+         break
 
    result.collision_count = len(sim.last_collisions)
    return result
@@ -181,9 +184,9 @@ def verify_adaptive_paper_configs(base_dir: Path, *, steps: int = 200) -> None:
 
    for path in paths:
       try:
+         print(f"Start {path.name}:")
          result = _run_simulation(path, steps)
       except Exception as exc:
-         print(f"{path.name}:")
          print(f"  SKIPPED: {exc}")
          print()
          continue

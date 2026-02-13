@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, OptimizeResult
 
 from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints)
+
+_log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
    from drone_sim.domain.drone import Drone
@@ -39,6 +42,7 @@ class LocalMPCSolver:
    # Optimizer settings
    max_iter: int = 100
    f_tol: float = 1e-4
+   symmetry_break_eps: float = 0.05  # Random noise magnitude for symmetry breaking
 
    def solve(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]], obstacles: list[tuple[np.ndarray, float]] | None = None,
          room_min: np.ndarray | None = None, room_max: np.ndarray | None = None, u_prev: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, bool]:
@@ -70,6 +74,13 @@ class LocalMPCSolver:
          u0 = _pad_or_trim_horizon(controller.central_initial_guess(drone), horizon)
 
       u0 = np.clip(u0, u_min, u_max)
+
+      # Symmetry-breaking noise to prevent collinear deadlocks
+      if self.symmetry_break_eps > 0:
+         noise = np.random.uniform(
+            -self.symmetry_break_eps, self.symmetry_break_eps, size=u0.shape,
+         )
+         u0 = np.clip(u0 + noise, u_min, u_max)
 
       # Pre-build constraint evaluators (stateless, depend only on horizon)
       collision_c = MovingObstacleAvoidanceConstraints(horizon=horizon)
@@ -109,7 +120,63 @@ class LocalMPCSolver:
       g = constraints(u_opt.flatten())
       feasible = result.success and (len(g) == 0 or g.min() >= -1e-6)
 
+      # Infeasible fallback: decelerate, then hold position
+      if not feasible:
+         u_opt, traj_opt, feasible = self._infeasible_fallback(
+            drone, u_opt, traj_opt, constraints, u_min, u_max, horizon,
+         )
+
+      if _log.isEnabledFor(logging.DEBUG):
+         self._debug_log_feasibility_check(drone, neighbor_trajectories, feasible, result, traj_opt, g)
+
       return u_opt, traj_opt, feasible
+
+   def _infeasible_fallback(
+      self,
+      drone: Drone,
+      u_opt: np.ndarray,
+      traj_opt: np.ndarray,
+      constraints_fn,
+      u_min: np.ndarray,
+      u_max: np.ndarray,
+      horizon: int,
+   ) -> tuple[np.ndarray, np.ndarray, bool]:
+      """Try safe fallback controls when the optimizer returns infeasible.
+
+      Fallback order:
+      1. Decelerate — brake toward zero velocity
+      2. Hold position — zero control (no acceleration, let the other drone resolve)
+
+      :return: (u, trajectory, feasible) for the best fallback found
+      """
+      v_current = np.asarray(drone.x, dtype=float)[3:6]
+
+      # Fallback 1: decelerate (brake toward zero velocity)
+      u_decel_step = np.clip(-v_current / self.dt, u_min, u_max)
+      u_decel = np.tile(u_decel_step, (horizon, 1))
+      traj_decel, _ = self._predict_states(drone, u_decel)
+      g_decel = constraints_fn(u_decel.flatten())
+      if len(g_decel) == 0 or g_decel.min() >= -1e-6:
+         _log.debug("  fallback: DECELERATE for %s", drone.drone_id)
+         return u_decel, traj_decel, True
+
+      # Fallback 2: zero control (hold — don't accelerate)
+      u_zero = np.zeros((horizon, 3))
+      traj_zero, _ = self._predict_states(drone, u_zero)
+      g_zero = constraints_fn(u_zero.flatten())
+      if len(g_zero) == 0 or g_zero.min() >= -1e-6:
+         _log.debug("  fallback: HOLD for %s", drone.drone_id)
+         return u_zero, traj_zero, True
+
+      # All fallbacks failed — pick the least-violating option
+      options = [
+         (u_opt, traj_opt, constraints_fn(u_opt.flatten())),
+         (u_decel, traj_decel, g_decel),
+         (u_zero, traj_zero, g_zero),
+      ]
+      best_u, best_traj, _ = max(options, key=lambda o: o[2].min() if len(o[2]) else 0.0)
+      _log.debug("  fallback: ALL FAILED for %s, using least-violating", drone.drone_id)
+      return best_u, best_traj, False
 
    def _predict_states(self, drone: Drone, u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
       """Predict position and velocity trajectories from state and controls.
@@ -130,3 +197,13 @@ class LocalMPCSolver:
          velocities[step] = x[3:6]
 
       return positions, velocities
+
+   def _debug_log_feasibility_check(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray]], feasible: bool,
+                                         result: OptimizeResult, traj_opt: np.ndarray, g: np.ndarray):
+      _log.debug("SOLVE %s  feasible=%s  opt_success=%s  g_min=%.4f  cost=%.4f",
+                 drone.drone_id, feasible, result.success, g.min() if len(g) else float("nan"), result.fun)
+      for nid, (ntraj, nvel) in neighbor_trajectories.items():
+         ntraj = np.asarray(ntraj, dtype=float).reshape((-1, 3))
+         dists = np.linalg.norm(traj_opt - ntraj, axis=1)
+         _log.debug("  neighbor=%s  dists=%s  safety_ego=%.2f  safety_nbr=%.2f  threshold=%.2f",
+                    nid, np.round(dists, 3), drone.safety_zone, drone.safety_zone, 2 * drone.safety_zone)

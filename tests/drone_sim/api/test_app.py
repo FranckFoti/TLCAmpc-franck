@@ -367,7 +367,7 @@ class TestAdaptiveVisualization:
          ],
          "controller": {
             "type": "mpc_agent_adaptive",
-            "params": {"horizon": 4, "lambda_vel": 1.0}
+            "params": {"horizon": 4, "lambda_vel": 0.5}
          },
          "coordinator": {
             "type": "mpc_central",
@@ -382,7 +382,7 @@ class TestAdaptiveVisualization:
                "radius": 0.2,
                "safety_zone": 1.0,
                "cons_stop": 0.0,
-               "alpha": 0.4,
+               "alpha": 0.3,
                "drone_color": "#00FFFF"
             }
          ],

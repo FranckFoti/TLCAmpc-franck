@@ -264,6 +264,8 @@ These constraints are enforced within the centralized SLSQP optimization and are
 
 ## 6. MPC Weight Tuning Reference
 
+### 6.1 QR Weight Sweep (Baseline)
+
 A parameter sweep over the MPC cost weights `q_pos`, `q_vel`, and `r_u` was conducted across multiple scenario configurations (3–6 drones, varying safety zones, control bounds, and room sizes). Results are stored in `drones_paper_tests/qr_param_swep_result/`.
 
 | Parameter | Good Range | Notes |
@@ -280,7 +282,46 @@ A parameter sweep over the MPC cost weights `q_pos`, `q_vel`, and `r_u` was cond
   <img src="./drones_paper_tests/qr_param_swep_result/results/weight_heatmap.png" width="600" alt="QR Weight Parameter Sweep Heatmap">
 </p>
 
-These serve as baseline weights for adaptive safety zone tuning (`alpha`, `lambda_vel`).
+These serve as baseline weights for the adaptive safety zone tuning below.
+
+### 6.2 Adaptive Safety Sphere Tuning (`alpha`, `lambda_vel`)
+
+The adaptive safety sphere radius is computed as:
+
+$$r_k = r_{\min} + \alpha \cdot \lambda_{\text{vel}} \cdot \|v_k\|$$
+
+where `alpha` scales overall sphere growth and `lambda_vel` controls the velocity-dependent component. Results stored in `adaptive_drones_paper/`.
+
+#### Full 6D Parameter Sweep
+
+A sweep of 1296 combinations (3 drones, central MPC, `box_8_1_5` room, 200 steps) tested:
+`H` in {3,4,5}, `q_pos` in {2,3,4,5}, `q_vel` in {0.1,0.2,0.3}, `r_u` in {0.1,0.5,0.8}, `alpha` in {0.3,0.4,0.5}, `lambda_vel` in {0.3,0.4,0.5,0.6}.
+
+**Results:** 1292/1296 successful, **0 collisions**, 4 timeouts, 84% reached target.
+
+| Parameter | Effect on Goal Reaching | Recommendation |
+|-----------|------------------------|----------------|
+| `alpha` | Lower is better (0.3→90%, 0.5→74%) | 0.3–0.4 |
+| `lambda_vel` | No significant effect (88% across all values) | 0.4–0.5 |
+| `r_u` | 0.5 best (94%), then 0.8 (86%), then 0.1 (72%) | 0.5 |
+| `H` (horizon) | Longer is better (H=5→92%, H=3→69%) | 4–5 |
+
+**Key insight — safety vs. reachability tradeoff:** Configurations with very high margins (safest) were too conservative for drones to reach their target. Configurations that reached target had tight but safe margins (~0.0). **Recommended balance:** `H=4`, `q_pos=4.0`, `r_u=0.5`, `alpha=0.3–0.4`, `lambda_vel=0.4–0.5`.
+
+<p align="center">
+  <img src="./adaptive_drones_paper/full_adaptive_heatmap.png" width="600" alt="Adaptive Parameter Sweep Heatmap">
+</p>
+
+#### Adaptive vs. Fixed Sphere Comparison (4 Drones)
+
+| Metric | Adaptive (MPC) | Fixed (MPC) | Adaptive (DMPC) | Fixed (DMPC) |
+|--------|---------------|-------------|-----------------|--------------|
+| Max speed | 0.62 | 0.53 | 0.63 | 0.52 |
+| Room margin | 0.60 | 0.06 | 0.58 | ~0.0 |
+| Avg step time | 0.081s | 0.038s | 0.066s | 0.043s |
+| Collisions | 0 | 0 | 0 | 0 |
+
+Adaptive spheres achieve **15–22% higher max speed** and significantly better room margins (drones stay well inside boundaries), at the cost of 50–120% longer solve times (still real-time at <0.1s/step).
 
 ## 7. Citation
 If you use this code or build upon our work, please cite our paper:

@@ -6,7 +6,7 @@
       "id": "standard",
       "type": "linear_kinematics",
       "params": {
-        "v_max": 5.0,
+        "v_max": 3.0,
         "u_min": [-3.0, -3.0, -3.0],
         "u_max": [3.0, 3.0, 3.0]
       }
@@ -19,7 +19,7 @@
     "type": "mpc_agent",
     "params": {
       "horizon": 4,
-      "q_pos": [3.0, 3.0, 3.0],
+      "q_pos": [2.0, 2.0, 2.0],
       "q_vel": [1.0, 1.0, 1.0],
       "r_u": [0.5, 0.5, 0.5]
     }
@@ -36,8 +36,8 @@
     {
       "drone_id": "drone-1",
       "physics": "standard",
-      "start": [-2.0, 0.0, 0.0],
-      "target": [2.0, 0.0, 0.0],
+      "start": [-0.146, -1.175, -0.504],
+      "target": [0.146, 1.175, 0.504],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -46,8 +46,8 @@
     {
       "drone_id": "drone-2",
       "physics": "standard",
-      "start": [2.0, 0.0, 0.0],
-      "target": [-2.0, 0.0, 0.0],
+      "start": [0.022, 1.212, -1.095],
+      "target": [-0.022, -1.212, 1.095],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -56,8 +56,8 @@
     {
       "drone_id": "drone-3",
       "physics": "standard",
-      "start": [0.0, -2.0, 0.0],
-      "target": [0.0, 2.0, 0.0],
+      "start": [0.881, 0.113, 1.299],
+      "target": [-0.881, -0.113, -1.299],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -66,8 +66,8 @@
     {
       "drone_id": "drone-4",
       "physics": "standard",
-      "start": [0.0, 2.0, 0.0],
-      "target": [0.0, -2.0, 0.0],
+      "start": [-1.148, 0.721, 1.055],
+      "target": [1.148, -0.721, -1.055],
       "radius": 0.2,
       "safety_zone": 1.0,
       "cons_stop": 0.0,

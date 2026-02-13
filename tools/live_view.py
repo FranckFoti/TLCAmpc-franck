@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> None:
                   help="Either a JSON file path (e.g. configs/2DronesHorizon2.json) or param has to set at least 'num_drones' and 'horizon'")
 
    p.add_argument("--param", action="append", default=[], help="Template parameter KEY=VALUE (may be repeated)")
-   p.add_argument("--steps", type=int, default=500)
+   p.add_argument("--steps", type=int, default=1000)
    p.add_argument("--step-n", type=int, default=1)
    p.add_argument("--sleep", type=float, default=0.05)
    p.add_argument("--trace-len", type=int, default=500)

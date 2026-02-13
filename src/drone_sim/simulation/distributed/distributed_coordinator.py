@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import random
 import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 from drone_sim.domain.drone import Drone, has_central_cost
 from drone_sim.domain.registry import register_coordinator
@@ -36,6 +39,7 @@ class DistributedMPCCoordinator:
    dual_tol: float = 1e-3
    comm_radius: float | None = None  # For NeighborGraph
    gauss_seidel: bool = True  # Use Gauss-Seidel updates for symmetry breaking
+   stagnation_limit: int = 3  # Break early if no drone makes progress for this many iterations
 
    # Internal state (initialized in __post_init__)
    _neighbor_graph: NeighborGraph = field(init=False)
@@ -69,6 +73,7 @@ class DistributedMPCCoordinator:
       if not opt_drones:
          return {}
 
+      # TODO: get rid of this all over list handlings. Use the drones list instead
       opt_ids = [d.drone_id for d in opt_drones]
       drone_by_id = {d.drone_id: d for d in opt_drones}
       all_drones_by_id = {d.drone_id: d for d in drones}
@@ -91,10 +96,16 @@ class DistributedMPCCoordinator:
 
       # 3. ADMM iteration loop
       converged = False
+      stagnated = False
 
       # Track controls across iterations for final output
       controls: dict[str, np.ndarray] = {}
 
+      # Track trajectory changes for stagnation detection
+      prev_trajectories: dict[str, np.ndarray] = {did: traj.copy() for did, traj in trajectories.items()}
+      stagnation_count = 0
+
+      iteration = 0
       for iteration in range(self.max_admm_iter):
          # Determine drone solving order for this iteration
          drone_order = list(opt_ids)
@@ -109,9 +120,7 @@ class DistributedMPCCoordinator:
          # 3a. Broadcast current trajectories via mailbox (initial state)
          self._mailbox.clear()
          for drone_id in opt_ids:
-            self._mailbox.broadcast(sender_id=drone_id, trajectory=trajectories[drone_id],
-                                    predicted_velocities=None, timestamp=0,
-                                    neighbor_graph=self._neighbor_graph)
+            self._mailbox.broadcast(sender_id=drone_id, trajectory=trajectories[drone_id], predicted_velocities=None, timestamp=0, neighbor_graph=self._neighbor_graph)
 
          # 3b. For each drone: receive neighbors, solve local MPC
          if self.gauss_seidel:
@@ -150,23 +159,15 @@ class DistributedMPCCoordinator:
             # Jacobi: all drones use stale data, update all at once
             trajectories, controls = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max)
 
-         # 3c. Update z and lambda for all neighbor pairs
-         for pair in neighbor_pairs:
-            id_i, id_j = pair
-            traj_i = trajectories[id_i]
-            traj_j = trajectories[id_j]
+         # 3c. Stagnation detection — break early if no drone made progress
+         stagnated, prev_trajectories = self.is_stagneted(trajectories, prev_trajectories, opt_ids, stagnation_count, iteration)
+         if stagnated:
+            break
 
-            # Get velocities from broadcast messages
-            vel_i = self._get_velocity_from_messages(id_i, id_j)
-            vel_j = self._get_velocity_from_messages(id_j, id_i)
-            radii_i = self._compute_safety_radii(all_drones_by_id[id_i], vel_i)
-            radii_j = self._compute_safety_radii(all_drones_by_id[id_j], vel_j)
-            min_dist = radii_i + radii_j
+         # 3d. Update z and lambda for all neighbor pairs
+         self.update_z(trajectories, all_drones_by_id, neighbor_pairs)
 
-            self._admm_state.update_z(pair, traj_i, traj_j, min_dist)
-            self._admm_state.update_lambda(pair, traj_i, traj_j)
-
-         # 3d. Check convergence
+         # 3e. Check convergence
          if self._admm_state.is_converged(trajectories):
             converged = True
             break
@@ -180,8 +181,11 @@ class DistributedMPCCoordinator:
       self._last_dual_residual = dual_res
       self._last_converged = converged
 
+      if _log.isEnabledFor(logging.DEBUG):
+         self._debug_log_status(iteration, converged, stagnated, primal_res, dual_res, drones, trajectories, controls)
+
       # Warn if not converged (but don't fail - use best-effort solution)
-      if not converged:
+      if not converged and not stagnated:
          warnings.warn(f"DistributedMPCCoordinator did not converge after {self.max_admm_iter} "
                        f"iterations (primal/dual residuals may exceed tolerance)", RuntimeWarning, stacklevel=2, )
 
@@ -232,6 +236,37 @@ class DistributedMPCCoordinator:
                                  neighbor_graph=self._neighbor_graph)
 
       return new_trajectories, new_controls
+
+   def update_z(self, trajectories: dict[str, np.ndarray], all_drones_by_id: dict[str, Drone], neighbor_pairs: list[tuple[str, str]]) -> None:
+      for pair in neighbor_pairs:
+         id_i, id_j = pair
+         traj_i = trajectories[id_i]
+         traj_j = trajectories[id_j]
+
+         # Get velocities from broadcast messages
+         vel_i = self._get_velocity_from_messages(id_i, id_j)
+         vel_j = self._get_velocity_from_messages(id_j, id_i)
+
+         radii_i = self._compute_safety_radii(all_drones_by_id[id_i], vel_i)
+         radii_j = self._compute_safety_radii(all_drones_by_id[id_j], vel_j)
+         min_dist = radii_i + radii_j
+
+         self._admm_state.update_z(pair, traj_i, traj_j, min_dist)
+         self._admm_state.update_lambda(pair, traj_i, traj_j)
+
+   def is_stagneted(self, trajectories: dict[str, np.ndarray], prev_trajectories: dict[str, np.ndarray], opt_ids: list[str], stagnation_count: int, iteration: int):
+      max_change = max(float(np.linalg.norm(trajectories[did] - prev_trajectories[did])) for did in opt_ids)
+      if max_change < self.primal_tol:
+         stagnation_count += 1
+      else:
+         stagnation_count = 0
+      prev_trajectories = {did: trajectories[did].copy() for did in opt_ids}
+
+      if stagnation_count >= self.stagnation_limit:
+         warnings.warn(f"ADMM stagnated after {iteration + 1} iterations — no drone made meaningful trajectory progress for {self.stagnation_limit} "
+                       f"consecutive iterations", RuntimeWarning, stacklevel=2)
+         return True, prev_trajectories
+      return False, prev_trajectories
 
    def init_trajectories(self, drones: list[Drone]) -> tuple[dict[str, np.ndarray], dict[str, LocalMPCSolver]]:
       # Initialize trajectories (use warm-start if available)
@@ -338,3 +373,19 @@ class DistributedMPCCoordinator:
       msgs = self._mailbox.receive(any_receiver_id)
       msg = msgs.get(sender_id)
       return msg.predicted_velocities if msg is not None else None
+
+   def _debug_log_status(self, iteration: int, converged: bool, stagnated: bool, primal_res: float, dual_res: float,
+                         drones: list[Drone], trajectories: dict[str, np.ndarray], controls: dict[str, np.ndarray]):
+      status = "converged" if converged else ("stagnated" if stagnated else "max_iter")
+      _log.debug("ADMM done: status=%s  iters=%d  primal=%.4e  dual=%.4e", status, iteration + 1, primal_res, dual_res)
+      for i, drone_i in enumerate(drones[:-1]):
+         for drone_j in drones[i+i:]:
+            dists = np.linalg.norm(trajectories[drone_i.drone_id] - trajectories[drone_j.drone_id], axis=1)
+            threshold = drone_i.safety_zone + drone_j.safety_zone
+            _log.debug("  pair %s-%s  dists=%s  threshold=%.2f  min_dist=%.3f  violated=%s", drone_i.drone_id, drone_j.drone_id,
+                       np.round(dists, 3), threshold, float(dists.min()), dists.min() < threshold)
+      for drone in drones:
+         u_seq = controls[drone.drone_id]
+         _log.debug("  %s  u[0]=%s  traj=%s", drone.drone_id, np.round(u_seq[0], 3),
+                    np.round(trajectories[drone.drone_id], 3).tolist())
+

@@ -24,7 +24,7 @@ def _make_config(
     coordinator: str = "mpc_central",
     alpha: float = 0.4,
     horizon: int = 4,
-    lambda_vel: float = 1.0,
+    lambda_vel: float = 0.5,
 ) -> dict:
     """Build a config dict for head-on drone scenarios.
 
@@ -125,8 +125,7 @@ class TestAdaptiveIntegration:
 
         Assert no safety-zone collisions occur at any step.
         """
-        config = _make_config(adaptive=True, num_drones=4, coordinator="mpc_central",
-                              alpha=0.4, horizon=4)
+        config = _make_config(adaptive=True, num_drones=4, coordinator="mpc_central", alpha=0.4, horizon=4)
         cfg = ScenarioConfig.model_validate(config)
         sim = Simulator.from_config(cfg)
 
@@ -185,7 +184,7 @@ class TestAdaptiveIntegration:
         lambda_vel penalty encourages deceleration.
         """
         config = _make_config(adaptive=True, num_drones=2, coordinator="mpc_central",
-                              alpha=0.4, horizon=4, lambda_vel=1.0)
+                              alpha=0.5, horizon=4, lambda_vel=0.5)
         cfg = ScenarioConfig.model_validate(config)
         sim = Simulator.from_config(cfg)
 
@@ -219,10 +218,8 @@ class TestAdaptiveIntegration:
 
         Both should complete 100 steps with no drone-drone collisions.
         """
-        config_adaptive = _make_config(adaptive=True, num_drones=4,
-                                       coordinator="mpc_central", horizon=4)
-        config_fixed = _make_config(adaptive=False, num_drones=4,
-                                    coordinator="mpc_central", horizon=4)
+        config_adaptive = _make_config(adaptive=True, num_drones=4, coordinator="mpc_central", horizon=4)
+        config_fixed = _make_config(adaptive=False, num_drones=4, coordinator="mpc_central", horizon=4)
 
         cfg_a = ScenarioConfig.model_validate(config_adaptive)
         cfg_f = ScenarioConfig.model_validate(config_fixed)
@@ -239,16 +236,8 @@ class TestAdaptiveIntegration:
                 sim_adaptive.step()
                 sim_fixed.step()
 
-                adaptive_collisions += len(
-                    [c for c in sim_adaptive.last_collisions if c["kind"] == "drone_drone"]
-                )
-                fixed_collisions += len(
-                    [c for c in sim_fixed.last_collisions if c["kind"] == "drone_drone"]
-                )
+                adaptive_collisions += len([c for c in sim_adaptive.last_collisions if c["kind"] == "drone_drone"])
+                fixed_collisions += len([c for c in sim_fixed.last_collisions if c["kind"] == "drone_drone"])
 
-        assert adaptive_collisions == 0, (
-            f"Adaptive mode had {adaptive_collisions} collisions"
-        )
-        assert fixed_collisions == 0, (
-            f"Fixed mode had {fixed_collisions} collisions"
-        )
+        assert adaptive_collisions == 0, (f"Adaptive mode had {adaptive_collisions} collisions")
+        assert fixed_collisions == 0, (f"Fixed mode had {fixed_collisions} collisions")

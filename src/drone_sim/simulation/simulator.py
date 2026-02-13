@@ -161,9 +161,9 @@ class Simulator:
                continue
 
             dist = float(np.linalg.norm(intr.position() - p_owner))
-            threshold = float(owner.safety_zone + intr.radius)
+            threshold = float(owner.safety_zone + intr.safety_zone)
 
-            if dist <= threshold:
+            if dist + 1e-6 <= threshold:
                events.append({"kind": "drone_drone", "owner": owner.drone_id, "intruder": intr.drone_id, "distance": dist, "threshold": threshold})
 
       # Drone-obstacle

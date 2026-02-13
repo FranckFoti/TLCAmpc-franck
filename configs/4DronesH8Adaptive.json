@@ -16,7 +16,7 @@
   "controller": {
     "type": "mpc_agent_adaptive",
     "params": {
-      "lambda_vel": 1.0,
+      "lambda_vel": 0.5,
       "horizon": 8
     }
   },
