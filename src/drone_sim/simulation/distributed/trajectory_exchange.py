@@ -17,6 +17,7 @@ class TrajectoryMessage:
     trajectory: np.ndarray  # (H, 3) predicted positions
     predicted_velocities: np.ndarray | None  # (H, 3) predicted velocities, or None
     timestamp: int  # Simulation timestep when message was created
+    safety_zone_radius: float | np.ndarray | None = None  # Safety zone radius (scalar or per-step array)
 
 
 @dataclass
