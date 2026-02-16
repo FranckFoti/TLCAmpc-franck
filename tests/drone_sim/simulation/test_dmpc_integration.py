@@ -31,7 +31,7 @@ class TestSimulatorLoadsDMPCConfig:
 
     def test_simulator_loads_dmpc_config_from_file(self):
         """Test Simulator.from_config loads 4DronesDMPC.json correctly."""
-        with open("configs/4DronesDMPC.json") as f:
+        with open("configs/dmpc/4DronesDMPC.json") as f:
             cfg_dict = json.load(f)
 
         cfg = ScenarioConfig(**cfg_dict)
@@ -471,7 +471,7 @@ class TestBackwardCompatibility:
 
     def test_central_mpc_still_loads(self):
         """Test 4DronesHorizon4.json (central MPC) still loads correctly."""
-        with open("configs/4DronesHorizon4.json") as f:
+        with open("configs/drones10020139/4DronesHorizon4.json") as f:
             cfg_dict = json.load(f)
 
         cfg = ScenarioConfig(**cfg_dict)
@@ -485,7 +485,7 @@ class TestBackwardCompatibility:
 
     def test_central_mpc_still_runs(self):
         """Test simulation with central MPC still runs correctly."""
-        with open("configs/4DronesHorizon4.json") as f:
+        with open("configs/drones10020139/4DronesHorizon4.json") as f:
             cfg_dict = json.load(f)
 
         cfg = ScenarioConfig(**cfg_dict)

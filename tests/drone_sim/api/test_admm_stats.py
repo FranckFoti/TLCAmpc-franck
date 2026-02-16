@@ -17,7 +17,7 @@ from drone_sim.simulation.simulator import Simulator
 @pytest.fixture
 def dmpc_config() -> ScenarioConfig:
     """Load 4DronesDMPC.json config."""
-    config_path = Path(__file__).parents[3] / "configs" / "4DronesDMPC.json"
+    config_path = Path(__file__).parents[3] / "configs" / "dmpc" / "4DronesDMPC.json"
     with open(config_path) as f:
         data = json.load(f)
     return ScenarioConfig.model_validate(data)

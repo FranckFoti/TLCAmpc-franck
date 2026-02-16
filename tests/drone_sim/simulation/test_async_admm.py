@@ -12,7 +12,7 @@ from drone_sim.simulation.simulator import Simulator
 
 def _load_config(name: str) -> ScenarioConfig:
     """Load a config by name."""
-    path = Path(__file__).parent.parent.parent.parent / "configs" / name
+    path = Path(__file__).parent.parent.parent.parent / "configs" / "dmpc" / name
     with open(path) as f:
         cfg = json.load(f)
     return ScenarioConfig.model_validate(cfg)
