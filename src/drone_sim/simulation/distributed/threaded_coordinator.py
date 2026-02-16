@@ -61,6 +61,8 @@ class ThreadedMPCCoordinator:
 
     # Internal state (initialized in __post_init__)
     _neighbor_graph: NeighborGraph = field(init=False, repr=False)
+    _last_iteration_count: int = field(init=False, repr=False, default=0)
+    _last_converged: bool = field(init=False, repr=False, default=False)
 
     def __post_init__(self) -> None:
         """Initialize internal neighbor graph."""
@@ -142,6 +144,14 @@ class ThreadedMPCCoordinator:
                 "ThreadedMPCCoordinator: Convergence timeout after %.2fs",
                 self.convergence_timeout_sec
             )
+
+        # Track convergence metrics for visualization API
+        self._last_converged = converged
+        # Iteration count = max iterations across all solvers
+        self._last_iteration_count = max(
+            (solver.iteration_count for solver in async_solvers.values()),
+            default=0
+        )
 
         # 9. Extract first-step controls from final solutions
         controls: dict[str, np.ndarray] = {}
@@ -320,3 +330,18 @@ class ThreadedMPCCoordinator:
 
             # Sleep before next check
             time.sleep(0.05)
+
+    def get_last_iteration_count(self) -> int:
+        """Get the maximum iteration count from the last solve.
+
+        Returns the maximum iteration count across all solver threads.
+        Useful for convergence analysis and visualization.
+        """
+        return self._last_iteration_count
+
+    def get_last_converged(self) -> bool:
+        """Check if the last solve converged before timeout.
+
+        Returns True if global convergence was achieved, False if timeout occurred.
+        """
+        return self._last_converged
