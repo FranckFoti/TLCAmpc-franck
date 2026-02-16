@@ -379,7 +379,7 @@ class DistributedMPCCoordinator:
       status = "converged" if converged else ("stagnated" if stagnated else "max_iter")
       _log.debug("ADMM done: status=%s  iters=%d  primal=%.4e  dual=%.4e", status, iteration + 1, primal_res, dual_res)
       for i, drone_i in enumerate(drones[:-1]):
-         for drone_j in drones[i+i:]:
+         for drone_j in drones[i+1:]:
             dists = np.linalg.norm(trajectories[drone_i.drone_id] - trajectories[drone_j.drone_id], axis=1)
             threshold = drone_i.safety_zone + drone_j.safety_zone
             _log.debug("  pair %s-%s  dists=%s  threshold=%.2f  min_dist=%.3f  violated=%s", drone_i.drone_id, drone_j.drone_id,
