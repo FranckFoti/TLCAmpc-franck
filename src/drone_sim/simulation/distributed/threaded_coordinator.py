@@ -61,6 +61,7 @@ class ThreadedMPCCoordinator:
 
     # Internal state (initialized in __post_init__)
     _neighbor_graph: NeighborGraph = field(init=False, repr=False)
+    _u_prev: dict[str, np.ndarray] = field(default_factory=dict, init=False, repr=False)
     _last_iteration_count: int = field(init=False, repr=False, default=0)
     _last_converged: bool = field(init=False, repr=False, default=False)
 
@@ -111,6 +112,9 @@ class ThreadedMPCCoordinator:
         for drone in opt_drones:
             local_solver = LocalMPCSolver(dt=self.dt, horizon=self.horizon)
 
+            # Pass warm-start from previous timestep if available
+            u_prev = self._u_prev.get(drone.drone_id)
+
             async_solver = AsyncLocalSolver(
                 drone=drone,
                 mailbox=mailbox,
@@ -118,6 +122,7 @@ class ThreadedMPCCoordinator:
                 local_solver=local_solver,
                 max_iterations=self.max_iterations,
                 convergence_threshold=self.convergence_threshold,
+                u_prev=u_prev,
             )
             async_solvers[drone.drone_id] = async_solver
 
@@ -157,6 +162,8 @@ class ThreadedMPCCoordinator:
         controls: dict[str, np.ndarray] = {}
         for drone_id, solver in async_solvers.items():
             if solver.u_prev is not None:
+                # Store full control sequence for warm-start
+                self._u_prev[drone_id] = solver.u_prev.copy()
                 controls[drone_id] = solver.u_prev[0].copy()
             else:
                 # Solver failed—return zero control
@@ -175,17 +182,28 @@ class ThreadedMPCCoordinator:
     ) -> None:
         """Send initial trajectory messages so first iteration doesn't block.
 
-        Pattern: Bootstrap with current position held constant over horizon.
-        This prevents deadlock where all drones wait for each other's first message.
+        Pattern: Bootstrap with forward-predicted trajectories from central_initial_guess.
+        This shows neighbors approaching (not stationary), creating earlier collision
+        constraint pressure for better convergence in collinear scenarios.
 
         :param mailbox: ThreadSafeMailbox to bootstrap
         :param async_solvers: Dict of drone_id -> AsyncLocalSolver
         """
         for drone_id, solver in async_solvers.items():
             drone = solver.drone
-            pos = np.asarray(drone.x[:3], dtype=float)
-            initial_traj = np.tile(pos, (self.horizon, 1))
-            initial_vel = np.zeros((self.horizon, 3), dtype=float)
+            controller = drone.controller
+
+            # Get initial control guess from controller
+            if solver.u_prev is not None:
+                # Warm-start: shift previous solution
+                u0 = np.concatenate([solver.u_prev[1:], solver.u_prev[-1:]], axis=0)
+            else:
+                # Cold start: use central_initial_guess
+                u0_raw = controller.central_initial_guess(drone)
+                u0 = self._pad_or_trim_horizon(u0_raw, self.horizon)
+
+            # Predict forward trajectory from initial controls
+            initial_traj, initial_vel = solver.solver._predict_states(drone, u0)
 
             message = TrajectoryMessage(
                 drone_id=drone_id,
@@ -201,6 +219,21 @@ class ThreadedMPCCoordinator:
                 message=message,
                 neighbor_ids=neighbor_ids,
             )
+
+    def _pad_or_trim_horizon(self, u: np.ndarray, horizon: int) -> np.ndarray:
+        """Pad or trim a control sequence to match the given horizon.
+
+        :param u: Control sequence to adjust
+        :param horizon: Target horizon length
+        :return: Adjusted control sequence (horizon, 3)
+        """
+        u = np.asarray(u, dtype=float).reshape((-1, 3))
+        if u.shape[0] < horizon:
+            pad = np.tile(u[-1:], (horizon - u.shape[0], 1))
+            u = np.concatenate([u, pad], axis=0)
+        elif u.shape[0] > horizon:
+            u = u[:horizon]
+        return u
 
     def _spawn_parallel(
         self,
@@ -345,3 +378,10 @@ class ThreadedMPCCoordinator:
         Returns True if global convergence was achieved, False if timeout occurred.
         """
         return self._last_converged
+
+    def get_neighbor_pairs(self) -> list[tuple[str, str]]:
+        """Get current neighbor pairs for visualization.
+
+        Returns list of (drone_id_1, drone_id_2) tuples for neighbor connections.
+        """
+        return self._neighbor_graph.get_neighbor_pairs()

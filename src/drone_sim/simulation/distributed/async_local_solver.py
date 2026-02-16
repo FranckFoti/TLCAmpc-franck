@@ -51,6 +51,7 @@ class AsyncLocalSolver:
         max_iterations: int = 100,
         convergence_threshold: float = 1e-3,
         stale_threshold_sec: float = 1.0,
+        u_prev: np.ndarray | None = None,
     ) -> None:
         """Initialize AsyncLocalSolver.
 
@@ -61,6 +62,7 @@ class AsyncLocalSolver:
         :param max_iterations: Maximum solve iterations per run() call
         :param convergence_threshold: Convergence threshold (placeholder for Phase 17)
         :param stale_threshold_sec: Maximum age of neighbor data in seconds
+        :param u_prev: Warm-start control sequence from previous timestep (H, 3) or None
         """
         self.drone = drone
         self.mailbox = mailbox
@@ -72,7 +74,7 @@ class AsyncLocalSolver:
         self.stale_threshold_sec = stale_threshold_sec
 
         # Warm-start state
-        self.u_prev: np.ndarray | None = None
+        self.u_prev: np.ndarray | None = u_prev
         self.traj_prev: np.ndarray | None = None
 
         # Metrics
