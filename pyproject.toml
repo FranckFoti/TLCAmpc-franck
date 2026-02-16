@@ -29,8 +29,15 @@ build-backend = "hatchling.build"
 packages = ["src/drone_sim"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+markers = [
+      "slow: long-running tests (integration, full pipeline)",
+  ]
 pythonpath = ["src"]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short -m 'not slow'"
 
 [tool.ruff]
 line-length = 100

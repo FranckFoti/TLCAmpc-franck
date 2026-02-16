@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from typing import Literal, Sequence
 
 from drone_sim.domain.config import (ControllerSpec, DroneConfig, ObstacleConfig, PhysicsSpec, RoomConfig, ScenarioConfig)
 from drone_sim.domain.drone import Drone
@@ -14,6 +14,14 @@ _COLOR_BY_DRONE_INDEX = {1: "#00FFFF",  # cyan / tab:cyan
       5: "#9400D3",  # dark violet
       6: "#008B8B",  # dark cyan
       7: "#FF69B4",  # hot pink
+}
+
+# Default DMPC ADMM coordinator parameters (from configs/*DMPC.json)
+_DMPC_ADMM_DEFAULTS = {
+    "rho": 1.0,
+    "max_admm_iter": 50,
+    "primal_tol": 1e-3,
+    "dual_tol": 1e-3,
 }
 
 # Predefined start/target patterns inspired by the paper configs in `configs/`.
@@ -39,24 +47,34 @@ def _all_drones_reached_destination(drones: list[Drone]) -> bool:
    reached = [drone.route.target_reached(position=drone.position(), thresh=0.1) for drone in drones]
    return all(reached)
 
-def _build_scenario(num_drones: int, horizon: int) -> ScenarioConfig:
+CoordinatorType = Literal["mpc_central", "dmpc_admm"]
+
+def _build_scenario(num_drones: int, horizon: int, v_max: float, u_max: float, coordinator_type: CoordinatorType = "mpc_central") -> ScenarioConfig:
    """Construct a ScenarioConfig using paper-style start/target patterns.
 
    For N=2..7 we use fixed patterns that mirror the JSON configs in `configs/`.
    If num_drones is outside this range, we fall back to a generic circle.
+
+   Args:
+       num_drones: Number of drones (2-7 use predefined patterns, others use circle fallback)
+       horizon: MPC prediction horizon
+       coordinator_type: Either "mpc_central" for centralized MPC or "dmpc_admm" for distributed ADMM
    """
 
    dt = 0.1
 
    room = RoomConfig(min=[-2.5, -2.5, -2.5], max=[2.5, 2.5, 2.5])
 
-   physics = PhysicsSpec(type="linear_kinematics", params={})
+   physics = PhysicsSpec(id="default", type="linear_kinematics",
+                         params={"v_max": v_max, "u_min": [-u_max]*3, "u_max": [u_max]*3})
 
    controller = ControllerSpec(type="mpc_agent",
-                               params={"horizon": horizon, "q_pos": [3.0, 3.0, 3.0], "r_u": [0.1, 0.1, 0.1],
-                                       "u_min": [-3.0, -3.0, -3.0], "u_max": [3.0, 3.0, 3.0]})
+                               params={"horizon": horizon, "q_pos": [3.0, 3.0, 3.0], "r_u": [0.1, 0.1, 0.1]})
 
-   coordinator = ControllerSpec(type="mpc_central", params={"horizon": horizon})
+   if coordinator_type == "dmpc_admm":
+      coordinator = ControllerSpec(type="dmpc_admm", params={"horizon": horizon, **_DMPC_ADMM_DEFAULTS})
+   else:
+      coordinator = ControllerSpec(type="mpc_central", params={"horizon": horizon})
 
    drones: list[DroneConfig] = []
    pattern = _PREDEFINED_PATTERNS.get(num_drones)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import Response
@@ -66,14 +67,46 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
 
    traces = [[] if trace_len == 0 else _sim.traces.get(d.drone_id, [])[-trace_len:] for d in _sim.drones]
 
-   # Use fixed safety zones as defined on each drone (no velocity-dependent adjustment).
-   safety_zones = [float(d.safety_zone) for d in _sim.drones]
+   # Compute per-drone safety zone radius and wireframe alpha.
+   # compute_adaptive_radius handles both adaptive (velocity-dependent) and fixed drones.
+   safety_zones: list[float] = []
+   safety_alphas: list[float] = []
+   for d in _sim.drones:
+       vel = d.velocity()
+       safety_zones.append(float(d.compute_adaptive_radius(vel)))
+       if d.is_adaptive:
+           speed_ratio = min(float(np.linalg.norm(vel)) / d.v_max, 1.0) if d.v_max > 0 else 0.0
+           safety_alphas.append(0.3 + 0.7 * speed_ratio)
+       else:
+           safety_alphas.append(0.8)
+
+   # Extract ADMM visualization data if using distributed coordinator
+   neighbor_links = None
+   admm_iteration_count = None
+   admm_converged = None
+
+   if hasattr(_sim.coordinator, "get_neighbor_pairs"):
+      # Build neighbor links as index pairs (not drone_id pairs)
+      drone_id_to_idx = {d.drone_id: i for i, d in enumerate(_sim.drones)}
+      id_pairs = _sim.coordinator.get_neighbor_pairs()
+      neighbor_links = [
+         (drone_id_to_idx[id_i], drone_id_to_idx[id_j])
+         for id_i, id_j in id_pairs
+         if id_i in drone_id_to_idx and id_j in drone_id_to_idx
+      ]
+      admm_iteration_count = _sim.coordinator.get_last_iteration_count()
+      admm_converged = _sim.coordinator.get_last_converged()
 
    png = render_png(room_min=_sim.room_min, room_max=_sim.room_max, drone_positions=[d.position() for d in _sim.drones],
                     drone_radii=[d.radius for d in _sim.drones], drone_safety_zones=safety_zones,
                     drone_colors=[d.color for d in _sim.drones], safety_colors=[d.safety_color for d in _sim.drones],
                     trace_colors=[d.trace_color for d in _sim.drones], drone_traces=traces, obstacles=_sim.obstacles,
-                    step_count=_sim.step_count, compute_time_s=_sim.compute_time_s, width=width, height=height, dpi=dpi,
+                    step_count=_sim.step_count, compute_time_s=_sim.compute_time_s,
+                    neighbor_links=neighbor_links,
+                    admm_iteration_count=admm_iteration_count,
+                    admm_converged=admm_converged,
+                    safety_alphas=safety_alphas,
+                    width=width, height=height, dpi=dpi,
                     elev=elev, azim=azim)
 
    return Response(content=png, media_type="image/png")

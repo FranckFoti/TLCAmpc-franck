@@ -9,6 +9,7 @@ from pathlib import Path
 from string import Template
 from typing import Any, NoReturn
 
+import numpy as np
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -16,6 +17,7 @@ from PIL import Image
 from drone_sim.api.render import render_png
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
+from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 from tools import _build_scenario, _all_drones_reached_destination
 
 
@@ -50,11 +52,11 @@ def create_scenario(config_path: str | Path | None, params: dict[str, str] | Non
       scenario = _build_scenario(num_drones=int(num_str), horizon=int(hor_str))
    else:
       # Load raw JSON (with optional template substitution) and validate as ScenarioConfig.
-      cfg_raw = load_parametrized_json(config_path, params=params)
-      if not isinstance(cfg_raw, str):
-         raise TypeError(f"Config must decode to a JSON object/dict, got {type(cfg_raw).__name__}")
+      cfg_json = load_parametrized_json(config_path, params=params)
+      if not isinstance(cfg_json, dict):
+         raise TypeError(f"Config must decode to a JSON object/dict, got {type(cfg_json).__name__}")
 
-      scenario = ScenarioConfig.model_validate(json.loads(cfg_raw))
+      scenario = ScenarioConfig.model_validate(cfg_json)
 
    for param in params:
       print(f"{param}: {params[param]}")
@@ -97,26 +99,30 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
 
       # Prepare the same inputs that the /render handler would use.
       traces = [[] if trace_len == 0 else sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones]
-      safety_zones = [float(d.safety_zone) for d in sim.drones]
+      safety_zones: list[float] = []
+      safety_alphas: list[float] = []
+      for d in sim.drones:
+          vel = d.velocity()
+          safety_zones.append(float(d.compute_adaptive_radius(vel)))
+          if d.is_adaptive:
+              speed_ratio = min(float(np.linalg.norm(vel)) / d.v_max, 1.0) if d.v_max > 0 else 0.0
+              safety_alphas.append(0.3 + 0.7 * speed_ratio)
+          else:
+              safety_alphas.append(0.8)
 
-      png_bytes = render_png(
-            room_min=sim.room_min,
-            room_max=sim.room_max,
-            drone_positions=[d.position() for d in sim.drones],
-            drone_radii=[d.radius for d in sim.drones],
-            drone_safety_zones=safety_zones,
-            drone_colors=[d.color for d in sim.drones],
-            safety_colors=[d.safety_color for d in sim.drones],
-            trace_colors=[d.trace_color for d in sim.drones],
-            drone_traces=traces,
-            obstacles=sim.obstacles,
-            step_count=sim.step_count,
-            compute_time_s=sim.compute_time_s,
-            width=width,
-            height=height,
-            dpi=dpi,
-            elev=elev,
-            azim=azim,
+      is_distributed = isinstance(sim.coordinator, DistributedMPCCoordinator)
+      neighbor_links = None # sim.coordinator.get_neighbor_pairs() if is_distributed else None
+      admm_iteration_count = sim.coordinator.get_last_iteration_count() if is_distributed else None
+      admm_converged = sim.coordinator.get_last_converged() if is_distributed else None
+
+      png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max,
+            drone_positions=[d.position() for d in sim.drones], drone_radii=[d.radius for d in sim.drones], drone_safety_zones=safety_zones,
+            drone_colors=[d.color for d in sim.drones], safety_colors=[d.safety_color for d in sim.drones], trace_colors=[d.trace_color for d in sim.drones],
+            drone_traces=traces, obstacles=sim.obstacles,
+            step_count=sim.step_count, compute_time_s=sim.compute_time_s,
+            neighbor_links=neighbor_links, admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
+            safety_alphas=safety_alphas,
+            width=width, height=height, dpi=dpi, elev=elev, azim=azim
       )
 
       # For display
@@ -171,7 +177,7 @@ def main(argv: list[str] | None = None) -> None:
                   help="Either a JSON file path (e.g. configs/2DronesHorizon2.json) or param has to set at least 'num_drones' and 'horizon'")
 
    p.add_argument("--param", action="append", default=[], help="Template parameter KEY=VALUE (may be repeated)")
-   p.add_argument("--steps", type=int, default=500)
+   p.add_argument("--steps", type=int, default=1000)
    p.add_argument("--step-n", type=int, default=1)
    p.add_argument("--sleep", type=float, default=0.05)
    p.add_argument("--trace-len", type=int, default=500)

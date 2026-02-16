@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
 from drone_sim.controllers.base import Controller
 from drone_sim.domain.registry import register_controller
-from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
+
+if TYPE_CHECKING:
+   from drone_sim.domain.drone import Drone
 
 
 class CentralCostProvider(Protocol):
@@ -15,13 +17,10 @@ class CentralCostProvider(Protocol):
 
    dt: float
 
-   def central_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-      """Return (u_min, u_max) arrays of shape (3,)."""
-
-   def central_initial_guess(self, x0: np.ndarray, p_ref: np.ndarray) -> np.ndarray:
+   def central_initial_guess(self, drone: Drone) -> np.ndarray:
       """Return an initial guess u_seq of shape (H,3)."""
 
-   def central_cost(self, u_seq: np.ndarray, x0: np.ndarray, p_ref: np.ndarray) -> float:
+   def central_cost(self, u_seq: np.ndarray, drone: Drone) -> float:
       """Return scalar cost for this drone."""
 
 
@@ -49,50 +48,68 @@ class CentralMPCAgent(Controller):
    q_vel: list[float] = (0.5, 0.5, 0.5)
    r_u: list[float] = (0.2, 0.2, 0.2)
 
-   u_min: list[float] = (-3.0, -3.0, -3.0)
-   u_max: list[float] = (3.0, 3.0, 3.0)
-
    def __post_init__(self) -> None:
-      self._phys = LinearKinematicsPhysics(dt=self.dt)
       self._Qp = as_diagonal(self.q_pos)
       self._Qv = as_diagonal(self.q_vel)
       self._R = as_diagonal(self.r_u)
-      self._u_min = np.asarray(self.u_min, dtype=float)
-      self._u_max = np.asarray(self.u_max, dtype=float)
 
-   def central_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-      return self._u_min.copy(), self._u_max.copy()
-
-   def central_initial_guess(self, x0: np.ndarray, p_ref: np.ndarray) -> np.ndarray:
-      x0 = np.asarray(x0, dtype=float).reshape(6)
-      p_ref = np.asarray(p_ref, dtype=float).reshape(3)
+   def central_initial_guess(self, drone: Drone) -> np.ndarray:
+      x0 = np.asarray(drone.x, dtype=float).reshape(6)
+      p_ref = np.asarray(drone.route.current_ref(), dtype=float).reshape(3)
 
       p = x0[:3]
       v = x0[3:]
       a = (p_ref - p) - 0.5 * v
-      a = np.clip(a, self._u_min, self._u_max)
+      u_min, u_max = drone.bounds()
+      a = np.clip(a, u_min, u_max)
       return np.tile(a.reshape(1, 3), (self.horizon, 1))
 
-   def central_cost(self, u_seq: np.ndarray, x0: np.ndarray, p_ref: np.ndarray) -> float:
+   def central_cost(self, u_seq: np.ndarray, drone: Drone) -> float:
       # Allow the coordinator to choose the horizon length.
       u_seq = np.asarray(u_seq, dtype=float).reshape((-1, 3))
-      u_seq = np.clip(u_seq, self._u_min, self._u_max)
 
-      x = np.asarray(x0, dtype=float).reshape(6)
-      p_ref = np.asarray(p_ref, dtype=float).reshape(3)
+      x = np.asarray(drone.x, dtype=float).reshape(6)
+      p_ref = np.asarray(drone.route.current_ref(), dtype=float).reshape(3)
 
       total = 0.0
       for k in range(u_seq.shape[0]):
-         u = u_seq[k]
-         x = self._phys.A @ x + self._phys.B @ u
+         x = drone.physics.step(x, u_seq[k])
          e = x[:3] - p_ref
          v = x[3:]
-         total += float(e @ self._Qp @ e + v @ self._Qv @ v + u @ self._R @ u)
+         total += float(e @ self._Qp @ e + v @ self._Qv @ v + u_seq[k] @ self._R @ u_seq[k])
 
       return float(total)
 
    # Controller interface: when used standalone, we just apply the first step of the initial guess.
-   def control(self, x: np.ndarray, p_ref: np.ndarray, neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]],
-               obstacles: list[tuple[np.ndarray, float]], *, self_radius: float, self_safety_zone: float) -> np.ndarray:
-      u0 = self.central_initial_guess(x, p_ref)[0]
-      return np.clip(u0, self._u_min, self._u_max)
+   def control(self, drone: Drone, neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]],
+               obstacles: list[tuple[np.ndarray, float]]) -> np.ndarray:
+      return self.central_initial_guess(drone)[0]
+
+
+@register_controller("mpc_agent_adaptive")
+@dataclass
+class AdaptiveMPCAgent(CentralMPCAgent):
+   """Per-drone cost model with velocity magnitude penalty for adaptive safety zones.
+
+   Adds ``lambda_vel * ||v||^2`` per step on top of the parent cost.
+   When drones use adaptive safety zones, higher velocity leads to larger
+   safety radii.  The velocity penalty encourages deceleration near
+   conflicts, naturally shrinking the safety zone.
+   """
+
+   lambda_vel: float = 0.8
+
+   def central_cost(self, u_seq: np.ndarray, drone: Drone) -> float:
+      u_seq = np.asarray(u_seq, dtype=float).reshape((-1, 3))
+
+      x = np.asarray(drone.x, dtype=float).reshape(6)
+      p_ref = np.asarray(drone.route.current_ref(), dtype=float).reshape(3)
+
+      total = 0.0
+      for k in range(u_seq.shape[0]):
+         x = drone.physics.step(x, u_seq[k])
+         e = x[:3] - p_ref
+         v = x[3:]
+         total += float(e @ self._Qp @ e + v @ self._Qv @ v + u_seq[k] @ self._R @ u_seq[k] + self.lambda_vel * float(np.dot(v, v)))
+
+      return float(total)

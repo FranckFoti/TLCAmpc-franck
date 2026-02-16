@@ -64,16 +64,28 @@ class Simulator:
       # Ensure implementations are registered
       from drone_sim.controllers import central_cost as _central_cost  # noqa: F401
       from drone_sim.physics import linear_kinematics as _  # noqa: F401
-      from drone_sim.simulation import coordinator as _coord  # noqa: F401
 
-      physics = create_physics({"type": cfg.physics.type, "params": {"dt": cfg.dt, **cfg.physics.params}})
+      # Build physics lookup: supports single PhysicsSpec or list of PhysicsSpec
+      physics_specs = cfg.physics if isinstance(cfg.physics, list) else [cfg.physics]
+      physics_by_id: dict[str | None, object] = {}
+      first_physics = None
+      for ps in physics_specs:
+         phys = create_physics({"type": ps.type, "params": {"dt": cfg.dt, **ps.params}})
+         physics_by_id[ps.id] = phys
+         if first_physics is None:
+            first_physics = phys
+      physics = first_physics
 
       drones: list[Drone] = []
 
       coordinator = None
       if cfg.coordinator is not None:
+         coord_params = {"dt": cfg.dt, **cfg.coordinator.params}
+         # Pass comm_radius for distributed coordinators
+         if cfg.comm_radius is not None:
+            coord_params["comm_radius"] = cfg.comm_radius
          coordinator = create_coordinator(
-               {"type": cfg.coordinator.type, "params": {"dt": cfg.dt, **cfg.coordinator.params}})
+               {"type": cfg.coordinator.type, "params": coord_params})
 
       for drone_cfg in cfg.drones:
          spec = drone_cfg.controller or cfg.controller
@@ -81,6 +93,9 @@ class Simulator:
          start = np.asarray(drone_cfg.start, dtype=float)
          x0 = np.zeros(6, dtype=float)
          x0[:3] = start
+
+         # Resolve per-drone physics: lookup by drone's physics ID, fall back to first/global
+         drone_physics = physics_by_id.get(drone_cfg.physics, physics)
 
          route = Route(waypoints=[np.asarray(w, dtype=float) for w in drone_cfg.waypoints],
                        target=np.asarray(drone_cfg.target, dtype=float))
@@ -90,7 +105,8 @@ class Simulator:
 
          drones.append(Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone,
                              cons_stop=drone_cfg.cons_stop, color=drone_color, safety_color=safety_color,
-                             trace_color=trace_color, controller=controller, x=x0, route=route))
+                             trace_color=trace_color, controller=controller, physics=drone_physics,
+                             x=x0, route=route, alpha=drone_cfg.alpha))
 
       obstacles = [(np.asarray(o.center, dtype=float), float(o.radius)) for o in cfg.obstacles]
 
@@ -131,6 +147,9 @@ class Simulator:
 
          A collision is reported when another drone enters the owner's safety sphere (radius = owner.safety_zone + intruder.radius)
          or when an obstacle center enters radius = owner.safety_zone + obstacle.radius.
+
+         Note: collision DETECTION stays with fixed safety_zone for now.
+         Adaptive radius only affects MPC constraints (Phase 10).
       """
       events: list[dict] = []
 
@@ -142,9 +161,9 @@ class Simulator:
                continue
 
             dist = float(np.linalg.norm(intr.position() - p_owner))
-            threshold = float(owner.safety_zone + intr.radius)
+            threshold = float(owner.safety_zone + intr.safety_zone)
 
-            if dist <= threshold:
+            if dist + 1e-6 <= threshold:
                events.append({"kind": "drone_drone", "owner": owner.drone_id, "intruder": intr.drone_id, "distance": dist, "threshold": threshold})
 
       # Drone-obstacle
@@ -189,21 +208,17 @@ class Simulator:
                          j in range(len(self.drones)) if j != i]
 
             if hasattr(d.controller, "control"):
-               u = d.controller.control(d.x, prefs[i], neighbors, self.obstacles, self_radius=d.radius,
-                                        self_safety_zone=d.safety_zone)
+               u = d.controller.control(d, neighbors, self.obstacles)
             else:
                u = np.zeros(3, dtype=float)
             us.append(np.asarray(u, dtype=float).reshape(3))
 
          # Then override optimized drones with coordinator outputs.
-         all_drone_state = {d.drone_id: (positions[i], velocities[i], float(d.radius)) for i, d in
-                            enumerate(self.drones)}
-
          try:
-            u_by_id = self.coordinator.solve_controls(drone_ids=[d.drone_id for d in self.drones], xs=[d.x for d in self.drones], prefs=prefs,
-                                                      radii=[d.radius for d in self.drones], safety_zones=[d.safety_zone for d in self.drones],
-                                                      cons_stops=[d.cons_stop for d in self.drones], controllers=[d.controller for d in self.drones],
-                                                      obstacles=self.obstacles, all_drone_state=all_drone_state, room_min=self.room_min, room_max=self.room_max)
+            u_by_id = self.coordinator.solve_controls(
+                                                      drones=self.drones,
+                                                      obstacles=self.obstacles,
+                                                      room_min=self.room_min, room_max=self.room_max)
 
          except RuntimeError as exc:
             # Mark the step as infeasible (e.g. walls/obstacles make the optimization problem infeasible) and abort this step without advancing the simulation time.
@@ -217,7 +232,8 @@ class Simulator:
 
          # Apply physics updates
          for d, u in zip(self.drones, us, strict=True):
-            d.x = self.physics.step(d.x, u)
+            d.x = d.predict(u)
+            # d.x = self.physics.step(d.x, u)
 
             # Keep the drone inside the room bounds. We clamp the position and zero the velocity component(s) that hit a wall.
             p = d.position()
@@ -244,10 +260,37 @@ class Simulator:
          self.compute_time_s += time.perf_counter() - t0
 
    def to_dict(self) -> dict:
-      return {"t": self.t, "dt": self.dt, "room": {"min": self.room_min.tolist(), "max": self.room_max.tolist()},
-            "drones": [{"drone_id": d.drone_id, "x": d.x.tolist(), "route_idx": d.route.idx,
-                        "p_ref": d.route.current_ref().tolist(), "radius": d.radius, "safety_zone": d.safety_zone,
-                        "drone_color": _color_to_json(d.color), "safety_color": _color_to_json(d.safety_color),
-                        "trace_color": _color_to_json(d.trace_color)} for d in self.drones],
-            "obstacles": [{"center": c.tolist(), "radius": r} for c, r in self.obstacles],
-            "collisions": list(self.last_collisions)}
+      result = {
+         "t": self.t,
+         "dt": self.dt,
+         "room": {"min": self.room_min.tolist(), "max": self.room_max.tolist()},
+         "drones": [
+            {
+               "drone_id": d.drone_id,
+               "x": d.x.tolist(),
+               "route_idx": d.route.idx,
+               "p_ref": d.route.current_ref().tolist(),
+               "radius": d.radius,
+               "safety_zone": d.safety_zone,
+               "adaptive_safety_radius": d.compute_adaptive_radius(d.velocity()) if d.is_adaptive else None,
+               "drone_color": _color_to_json(d.color),
+               "safety_color": _color_to_json(d.safety_color),
+               "trace_color": _color_to_json(d.trace_color),
+            }
+            for d in self.drones
+         ],
+         "obstacles": [{"center": c.tolist(), "radius": r} for c, r in self.obstacles],
+         "collisions": list(self.last_collisions),
+      }
+
+      # Add ADMM stats if using distributed coordinator
+      if hasattr(self.coordinator, "get_last_iteration_count"):
+         result["admm_stats"] = {
+            "iteration_count": self.coordinator.get_last_iteration_count(),
+            "primal_residual": self.coordinator.get_last_residuals()[0],
+            "dual_residual": self.coordinator.get_last_residuals()[1],
+            "converged": self.coordinator.get_last_converged(),
+            "neighbor_pairs": [list(pair) for pair in self.coordinator.get_neighbor_pairs()],
+         }
+
+      return result

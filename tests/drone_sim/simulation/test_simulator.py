@@ -350,6 +350,66 @@ class TestSimulatorToDict:
       assert isinstance(result["collisions"], list)
 
 
+class TestSimulatorAdaptiveConfigPipeline:
+   """Tests for adaptive alpha flowing through the config-to-drone pipeline."""
+
+   def test_from_config_fixed_safety_zone(self):
+      """Test config without alpha creates drone with is_adaptive=False."""
+      cfg = ScenarioConfig(
+         dt=0.1,
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         coordinator=ControllerSpec(type="mpc_central"),
+         drones=[DroneConfig(drone_id="d1", start=[0, 0, 5], target=[5, 5, 5], safety_zone=1.0)],
+         room=RoomConfig(min=[-10, -10, 0], max=[10, 10, 10]),
+      )
+      sim = Simulator.from_config(cfg)
+      drone = sim.drones[0]
+      assert drone.is_adaptive is False
+      assert drone.alpha is None
+      assert drone.safety_zone == 1.0
+
+   def test_from_config_adaptive_alpha(self):
+      """Test config with alpha creates drone with is_adaptive=True and correct alpha."""
+      cfg = ScenarioConfig(
+         dt=0.1,
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         coordinator=ControllerSpec(type="mpc_central"),
+         drones=[DroneConfig(drone_id="d1", start=[0, 0, 5], target=[5, 5, 5], alpha=0.5)],
+         room=RoomConfig(min=[-10, -10, 0], max=[10, 10, 10]),
+      )
+      sim = Simulator.from_config(cfg)
+      drone = sim.drones[0]
+      assert drone.is_adaptive is True
+      assert drone.alpha == 0.5
+
+   def test_from_config_mixed_drones(self):
+      """Test scenario with some fixed, some adaptive drones."""
+      cfg = ScenarioConfig(
+         dt=0.1,
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         coordinator=ControllerSpec(type="mpc_central"),
+         drones=[
+            DroneConfig(drone_id="fixed", start=[0, 0, 5], target=[5, 5, 5], safety_zone=1.0),
+            DroneConfig(drone_id="adaptive", start=[5, 0, 5], target=[0, 5, 5], alpha=0.5),
+         ],
+         room=RoomConfig(min=[-10, -10, 0], max=[10, 10, 10]),
+      )
+      sim = Simulator.from_config(cfg)
+      fixed_drone = sim.drones[0]
+      adaptive_drone = sim.drones[1]
+
+      # Fixed drone
+      assert fixed_drone.is_adaptive is False
+      assert fixed_drone.compute_adaptive_radius(np.zeros(3)) == fixed_drone.safety_zone
+
+      # Adaptive drone
+      assert adaptive_drone.is_adaptive is True
+      assert adaptive_drone.compute_adaptive_radius(np.zeros(3)) == adaptive_drone.safety_zone
+
+
 class TestSimulatorEdgeCases:
    """Edge case tests for Simulator."""
 

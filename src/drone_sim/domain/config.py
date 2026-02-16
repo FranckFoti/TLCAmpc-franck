@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 ColorValue = str | list[float]
 
 
 class PhysicsSpec(BaseModel):
    type: str
+   id: str | None = None
    params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -26,6 +27,9 @@ class DroneConfig(BaseModel):
    # Optional per-drone controller override (otherwise ScenarioConfig.controller is used).
    controller: ControllerSpec | None = None
 
+   # Physics model ID referencing a PhysicsSpec by name (None = use global physics).
+   physics: str | None = None
+
    # Drone physical radius (used for room clamping and visualization).
    radius: float = 0.2
 
@@ -35,6 +39,11 @@ class DroneConfig(BaseModel):
    # Conservative stopping addition, like it is shown in the paper
    cons_stop: float = 0.0
 
+   # Adaptive safety zone parameter. When set, the drone uses a velocity-dependent
+   # safety radius: r(t) = r_min + alpha * ||v||^2 / (2 * U_max).
+   # When None, the fixed safety_zone is used instead.
+   alpha: float | None = None
+
    # Colors used by the renderer. Each field accepts either:
    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
    # - an RGB list [r,g,b] either in 0..1 or 0..255.
@@ -43,6 +52,12 @@ class DroneConfig(BaseModel):
    safety_color: ColorValue | None = None
    # If omitted, the renderer uses the drone_color.
    trace_color: ColorValue | None = None
+
+   @model_validator(mode="after")
+   def _validate_alpha(self) -> DroneConfig:
+      if self.alpha is not None and self.alpha <= 0:
+         raise ValueError("alpha must be positive when set")
+      return self
 
 
 class ObstacleConfig(BaseModel):
@@ -60,7 +75,7 @@ class RoomConfig(BaseModel):
 
 class ScenarioConfig(BaseModel):
    dt: float = 0.1
-   physics: PhysicsSpec
+   physics: PhysicsSpec | list[PhysicsSpec]
 
    # Default controller used for drones that do not define DroneConfig.controller.
    controller: ControllerSpec
@@ -69,6 +84,11 @@ class ScenarioConfig(BaseModel):
    # This is optional for now, cause we want to make changes in central_cost later, so this is not needed any longer.
    # Nevertheless, maybe there will also be an completely global coordinated system later, this can be used also.
    coordinator: ControllerSpec | None = None
+
+   # Communication radius for distributed MPC neighbor discovery.
+   # When None, all drones are considered neighbors (backward compatible with centralized mode).
+   # When set to a positive float, only drones within this distance are neighbors.
+   comm_radius: float | None = None
 
    drones: list[DroneConfig]
    obstacles: list[ObstacleConfig] = Field(default_factory=list)

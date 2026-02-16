@@ -333,3 +333,73 @@ class TestApiIntegration:
       state2 = client.get("/state").json()
 
       assert state2["t"] == 0.0
+
+
+# =============================================================================
+# Adaptive Visualization Tests
+# =============================================================================
+class TestAdaptiveVisualization:
+   """Tests for adaptive safety zone visualization in API."""
+
+   def test_state_adaptive_safety_radius_none_for_fixed(self, configured_client):
+      """Test /state returns adaptive_safety_radius=None for non-adaptive drones."""
+      response = configured_client.get("/state")
+      data = response.json()
+
+      assert response.status_code == 200
+      for drone in data["drones"]:
+         assert drone["adaptive_safety_radius"] is None
+
+   def test_state_adaptive_safety_radius_computed_for_adaptive(self, client):
+      """Test /state returns non-None adaptive_safety_radius for adaptive drones."""
+      adaptive_config = {
+         "dt": 0.1,
+         "physics": [
+            {
+               "id": "standard",
+               "type": "linear_kinematics",
+               "params": {
+                  "v_max": 5.0,
+                  "u_min": [-3.0, -3.0, -3.0],
+                  "u_max": [3.0, 3.0, 3.0]
+               }
+            }
+         ],
+         "controller": {
+            "type": "mpc_agent_adaptive",
+            "params": {"horizon": 4, "lambda_vel": 0.5}
+         },
+         "coordinator": {
+            "type": "mpc_central",
+            "params": {"horizon": 4}
+         },
+         "drones": [
+            {
+               "drone_id": "adaptive-d1",
+               "physics": "standard",
+               "start": [-2.0, 0.0, 0.0],
+               "target": [2.0, 0.0, 0.0],
+               "radius": 0.2,
+               "safety_zone": 1.0,
+               "cons_stop": 0.0,
+               "alpha": 0.3,
+               "drone_color": "#00FFFF"
+            }
+         ],
+         "obstacles": [],
+         "room": {"min": [-5.0, -5.0, -5.0], "max": [5.0, 5.0, 5.0]}
+      }
+
+      client.post("/config", json=adaptive_config)
+      # Step a few times so the drone gets some velocity
+      client.post("/step?n=3")
+
+      response = client.get("/state")
+      data = response.json()
+
+      assert response.status_code == 200
+      drone = data["drones"][0]
+      assert drone["adaptive_safety_radius"] is not None
+      assert isinstance(drone["adaptive_safety_radius"], float)
+      # Adaptive radius should be at least the drone's physical radius
+      assert drone["adaptive_safety_radius"] >= drone["radius"]

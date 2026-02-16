@@ -12,7 +12,7 @@ from drone_sim.controllers.central_cost import CentralMPCAgent
 from drone_sim.domain.config import (DroneConfig, ScenarioConfig, PhysicsSpec, ControllerSpec, ObstacleConfig, RoomConfig)
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
-from drone_sim.simulation.coordinator import CentralMPCGlobalCoordinator
+from drone_sim.simulation.centralized.coordinator import CentralMPCGlobalCoordinator
 from drone_sim.simulation.simulator import Simulator
 
 
@@ -29,7 +29,7 @@ def valid_config():
    """Return a valid scenario configuration dict."""
    return {
       "dt": 0.1,
-      "physics": {"type": "linear_kinematics", "params": {}},
+      "physics": {"id": "default", "type": "linear_kinematics", "params": {"v_max": 5.0, "u_min": [-3.0, -3.0, -3.0], "u_max": [3.0, 3.0, 3.0]}},
       "controller": {"type": "mpc_agent", "params": {"horizon": 5}},
       "coordinator": {"type": "mpc_central", "params": {"horizon": 5}},
       "drones": [
@@ -40,6 +40,7 @@ def valid_config():
             "target": [5.0, 5.0, 5.0],
             "radius": 0.2,
             "safety_zone": 1.0,
+            "physics": "default",
          }
       ],
       "obstacles": [],
@@ -134,6 +135,7 @@ def sample_drone(sample_controller: CentralMPCAgent, sample_route: Route) -> Dro
       safety_color="tab:cyan",
       trace_color="tab:blue",
       controller=sample_controller,
+      physics=LinearKinematicsPhysics(dt=0.1),
       x=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float),
       route=sample_route
    )

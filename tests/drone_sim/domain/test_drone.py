@@ -13,6 +13,7 @@ from numpy.testing import assert_array_almost_equal, assert_array_equal
 
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.controllers.central_cost import CentralMPCAgent
+from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
 
 
 class TestRoute:
@@ -204,6 +205,7 @@ class TestDrone:
          safety_color="orange",
          trace_color="blue",
          controller=sample_controller,
+         physics=LinearKinematicsPhysics(dt=0.1),
          x=np.array([1e6, 1e6, 1e6, 1e3, 1e3, 1e3], dtype=float),
          route=sample_route
       )
@@ -221,8 +223,91 @@ class TestDrone:
          safety_color="orange",
          trace_color="blue",
          controller=sample_controller,
+         physics=LinearKinematicsPhysics(dt=0.1),
          x=np.array([-10.0, -20.0, -5.0, -1.0, -2.0, -0.5], dtype=float),
          route=sample_route
       )
       assert_array_almost_equal(drone.position(), np.array([-10.0, -20.0, -5.0]))
       assert_array_almost_equal(drone.velocity(), np.array([-1.0, -2.0, -0.5]))
+
+
+class TestDroneAdaptive:
+   """Tests for adaptive safety zone support on Drone."""
+
+   def test_drone_is_adaptive_false_by_default(self, sample_drone: Drone):
+      """Test alpha=None means not adaptive."""
+      assert sample_drone.alpha is None
+      assert sample_drone.is_adaptive is False
+
+   def test_drone_is_adaptive_true_when_alpha_set(self, sample_controller: CentralMPCAgent, sample_route: Route):
+      """Test alpha=0.5 means adaptive."""
+      drone = Drone(
+         drone_id="adaptive-1", radius=0.2, safety_zone=1.0, cons_stop=0.0,
+         color="tab:blue", safety_color="tab:blue", trace_color="tab:blue",
+         controller=sample_controller, physics=LinearKinematicsPhysics(dt=0.1),
+         x=np.zeros(6), route=sample_route, alpha=0.5,
+      )
+      assert drone.is_adaptive is True
+
+   def test_compute_adaptive_radius_fixed_mode(self, sample_drone: Drone):
+      """Test returns safety_zone when not adaptive."""
+      result = sample_drone.compute_adaptive_radius(np.array([1.0, 2.0, 3.0]))
+      assert result == sample_drone.safety_zone
+
+   def test_compute_adaptive_radius_at_rest(self, sample_controller: CentralMPCAgent, sample_route: Route):
+      """Test velocity=0 returns safety_zone (floor) since radius < safety_zone."""
+      drone = Drone(
+         drone_id="adaptive-1", radius=0.2, safety_zone=1.0, cons_stop=0.0,
+         color="tab:blue", safety_color="tab:blue", trace_color="tab:blue",
+         controller=sample_controller, physics=LinearKinematicsPhysics(dt=0.1),
+         x=np.zeros(6), route=sample_route, alpha=0.5,
+      )
+      result = drone.compute_adaptive_radius(np.zeros(3))
+      assert result == pytest.approx(drone.safety_zone)
+
+   def test_compute_adaptive_radius_moving(self, sample_controller: CentralMPCAgent, sample_route: Route):
+      """Verify formula: max(safety_zone, radius + alpha * ||v||^2 / (2 * U_max))."""
+      alpha = 2.0
+      drone = Drone(
+         drone_id="adaptive-1", radius=0.2, safety_zone=1.0, cons_stop=0.0,
+         color="tab:blue", safety_color="tab:blue", trace_color="tab:blue",
+         controller=sample_controller, physics=LinearKinematicsPhysics(dt=0.1),
+         x=np.zeros(6), route=sample_route, alpha=alpha,
+      )
+      velocity = np.array([3.0, 0.0, 0.0])
+      # LinearKinematicsPhysics default u_max = [3, 3, 3] → min(|u_max|) = 3
+      v_norm_sq = 3.0**2  # = 9.0
+      s_stop = v_norm_sq / (2.0 * 3.0)  # = 1.5
+      expected = drone.radius + alpha * s_stop  # = 0.2 + 2.0 * 1.5 = 3.2
+      assert expected > drone.safety_zone  # formula exceeds floor
+
+      result = drone.compute_adaptive_radius(velocity)
+      assert result == pytest.approx(expected)
+
+   def test_compute_adaptive_radius_floor_at_safety_zone(self, sample_controller: CentralMPCAgent, sample_route: Route):
+      """Test that at low velocity the adaptive radius is floored at safety_zone."""
+      drone = Drone(
+         drone_id="adaptive-1", radius=0.2, safety_zone=1.0, cons_stop=0.0,
+         color="tab:blue", safety_color="tab:blue", trace_color="tab:blue",
+         controller=sample_controller, physics=LinearKinematicsPhysics(dt=0.1),
+         x=np.zeros(6), route=sample_route, alpha=0.5,
+      )
+      # Small velocity: v=[0.1, 0, 0] → v_norm_sq=0.01, s_stop=0.01/6≈0.00167
+      # formula = 0.2 + 0.5*0.00167 ≈ 0.2008 < safety_zone=1.0
+      velocity = np.array([0.1, 0.0, 0.0])
+      result = drone.compute_adaptive_radius(velocity)
+      assert result == pytest.approx(drone.safety_zone)
+
+   def test_compute_adaptive_radius_increases_with_speed(self, sample_controller: CentralMPCAgent, sample_route: Route):
+      """Test that faster velocity gives larger radius (above safety_zone floor)."""
+      drone = Drone(
+         drone_id="adaptive-1", radius=0.2, safety_zone=1.0, cons_stop=0.0,
+         color="tab:blue", safety_color="tab:blue", trace_color="tab:blue",
+         controller=sample_controller, physics=LinearKinematicsPhysics(dt=0.1),
+         x=np.zeros(6), route=sample_route, alpha=2.0,
+      )
+      # slow: formula ≈ 0.53 < safety_zone → returns 1.0
+      r_slow = drone.compute_adaptive_radius(np.array([1.0, 0.0, 0.0]))
+      # fast: formula ≈ 5.53 > safety_zone → returns 5.53
+      r_fast = drone.compute_adaptive_radius(np.array([4.0, 0.0, 0.0]))
+      assert r_fast > r_slow

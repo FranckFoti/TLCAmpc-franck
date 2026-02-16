@@ -260,7 +260,6 @@ class TestCreateCoordinator:
    def test_create_coordinator_mpc_central(self):
       """Test create_coordinator creates CentralMPCGlobalCoordinator."""
       # Ensure the coordinator module is imported to register the coordinator
-      from drone_sim.simulation import coordinator  # noqa: F401
 
       spec = {"type": "mpc_central", "params": {"dt": 0.1, "horizon": 5}}
       coord = create_coordinator(spec)
@@ -300,7 +299,6 @@ class TestRegistryIntegration:
 
    def test_built_in_coordinator_registered(self):
       """Test that built-in coordinator types are registered after import."""
-      from drone_sim.simulation import coordinator  # noqa: F401
 
       assert "mpc_central" in COORDINATORS
 
