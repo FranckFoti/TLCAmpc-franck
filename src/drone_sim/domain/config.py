@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from drone_sim.simulation.coordinator import Coordinator
+
 ColorValue = str | list[float]
 
 
@@ -80,9 +82,7 @@ class ScenarioConfig(BaseModel):
    # Default controller used for drones that do not define DroneConfig.controller.
    controller: ControllerSpec
 
-   # The simulation step can be coordinated centrally (e.g. centralized MPC over a subset of drones) while still allowing per-drone controllers.
-   # This is optional for now, cause we want to make changes in central_cost later, so this is not needed any longer.
-   # Nevertheless, maybe there will also be an completely global coordinated system later, this can be used also.
+   # Optional coordinator used for distributed MPC neighbor discovery.
    coordinator: ControllerSpec | None = None
 
    # Communication radius for distributed MPC neighbor discovery.
