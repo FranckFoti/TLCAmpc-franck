@@ -326,12 +326,26 @@ Adaptive spheres achieve **15–22% higher max speed** and significantly better 
 ## 7. Citation
 If you use this code or build upon our work, please cite our paper:
 
-
+### release v1.1.0
 ```bibtex
-@article{dronesxxx,
-  title={Geometric and Control-Theoretic Limits on Drone Density in
-Bounded Airspace},
-  author={Altinses  Muemken, Lier, and Schwung},
-  journal={Drones}
+@article{drones10020139,
+    title={Geometric and Control-Theoretic Limits on Drone Density in Bounded Airspace},
+    author={Mümken, Linda and Altinses, Diyar and Lier, Stefan and Schwung, Andreas},
+    journal={Drones},
+    yeat = {2026},
+    issn = {2504-446X},
+    doi = {10.3390/drones10020139}
+}
+```
+
+### release v2.0.0 
+```bibtex
+@article{tlmpc,
+    title={},
+    author={Mümken, Linda and Schwung, Andreas},
+    journal={},
+    yeat = {2026},
+    issn = {},
+    doi = {}
 }
 ```
