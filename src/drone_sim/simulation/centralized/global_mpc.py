@@ -185,7 +185,9 @@ class GlobalMPCSolver:
       return vals
 
    def solve(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None = None,
-             room_max: np.ndarray | None = None, u_prev: dict[str, np.ndarray] | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+             room_max: np.ndarray | None = None, u_prev: dict[str, np.ndarray] | None = None,
+             lstm_radii: dict[str, np.ndarray] | None = None
+   ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
       """Solve the global MPC optimization for all drones.
 
       :param drones: List of Drone objects (only those with central_cost are optimized).
@@ -193,6 +195,9 @@ class GlobalMPCSolver:
       :param room_min: Room lower bounds (3,) or None.
       :param room_max: Room upper bounds (3,) or None.
       :param u_prev: Previous control sequences keyed by drone_id for warm-start.
+      :param lstm_radii: Optional dict mapping drone_id -> per-horizon safety radii (H,). When
+          provided, the SLSQP collision constraint closure uses these LSTM-predicted radii instead
+          of the fixed safety_zone values.  None means pre-Phase-24 behavior (backward compat).
       :return: Tuple of (controls_dict, u_sequences_dict) where:
           - controls_dict: {drone_id: first_step_control (3,)}
           - u_sequences_dict: {drone_id: full_u_sequence (horizon, 3)}
@@ -249,7 +254,9 @@ class GlobalMPCSolver:
       # Per-variable bounds: repeat each drone's (min, max) for every horizon step and axis
       bounds = [(float(u_mins[j, axis]), float(u_maxs[j, axis])) for j in range(num_optimized) for _ in range(self.horizon) for axis in range(3)]
 
-      cons = {"type": "ineq", "fun": lambda u_flat: self._constraints(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)}
+      cons = {"type": "ineq", "fun": lambda u_flat: self._constraints(
+         u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max,
+         lstm_radii=lstm_radii)}
 
       res = minimize(lambda u_flat: self._cost(u_flat, drones=opt_drones, controllers=opt_controllers, clip_u=clip_u), self._pack(u0), method="SLSQP",
             bounds=bounds, constraints=[cons], options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})

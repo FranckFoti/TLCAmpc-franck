@@ -57,7 +57,7 @@ class DistributedMPCCoordinator:
       self._admm_state = ADMMState(rho=self.rho, primal_tol=self.primal_tol, dual_tol=self.dual_tol, horizon=self.horizon, )
 
    def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None = None,
-                      room_max: np.ndarray | None = None, ) -> dict[str, np.ndarray]:
+                      room_max: np.ndarray | None = None, lstm_provider: object | None = None, ) -> dict[str, np.ndarray]:
       """Solve for drone controls using distributed ADMM optimization.
       Matches the CentralMPCGlobalCoordinator interface.
 
@@ -81,6 +81,18 @@ class DistributedMPCCoordinator:
       # 1. Update neighbor graph from current positions
       positions = {d.drone_id: np.asarray(d.x, dtype=float)[:3] for d in drones}
       self._neighbor_graph.update(positions)
+
+      # Pre-compute LSTM radii for all drones before the ADMM loop.
+      # Radii are keyed by (ego_drone_id, neighbor_id) — computed once, used throughout ADMM.
+      lstm_radii_by_drone: dict[str, dict[str, np.ndarray]] = {}
+      if lstm_provider is not None:
+         for drone in opt_drones:
+            neighbors = list(self._neighbor_graph.get_neighbors(drone.drone_id))
+            if neighbors:
+               r_floor = {nid: all_drones_by_id[nid].safety_zone for nid in neighbors}
+               lstm_radii_by_drone[drone.drone_id] = lstm_provider.compute_neighbor_safety_radii(
+                  neighbors, r_floor
+               )
 
       # 2. Get neighbor pairs and initialize ADMMState
       neighbor_pairs = self._neighbor_graph.get_neighbor_pairs()
@@ -116,7 +128,7 @@ class DistributedMPCCoordinator:
                random.shuffle(drone_order)
             else:
                # Later iterations: priority-based ordering (most constrained first)
-               drone_order.sort(key=lambda d: self._compute_priority(d, trajectories, velocities, all_drones_by_id))
+               drone_order.sort(key=lambda d: self._compute_priority(d, trajectories, velocities, all_drones_by_id, lstm_radii_by_drone))
 
          # 3a. Broadcast current trajectories via mailbox (initial state)
          self._mailbox.clear()
@@ -141,6 +153,7 @@ class DistributedMPCCoordinator:
                u_opt, traj_opt, success, vel_opt = solver.solve(
                   drone=drone, neighbor_trajectories=neighbor_trajectories,
                   obstacles=obstacles, room_min=room_min, room_max=room_max, u_prev=u_prev,
+                  lstm_radii=lstm_radii_by_drone.get(drone_id),
                )
 
                # Immediate update (Gauss-Seidel style)
@@ -154,7 +167,7 @@ class DistributedMPCCoordinator:
                                        neighbor_graph=self._neighbor_graph)
          else:
             # Jacobi: all drones use stale data, update all at once
-            trajectories, controls, velocities = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max, prev_controls=controls)
+            trajectories, controls, velocities = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max, prev_controls=controls, lstm_radii_by_drone=lstm_radii_by_drone)
 
          # 3c. Stagnation detection — break early if no drone made progress
          stagnated, prev_trajectories, stagnation_count = self._check_stagnation(
@@ -164,7 +177,7 @@ class DistributedMPCCoordinator:
             break
 
          # 3d. Update z and lambda for all neighbor pairs
-         self.update_z(trajectories, velocities, all_drones_by_id, neighbor_pairs)
+         self.update_z(trajectories, velocities, all_drones_by_id, neighbor_pairs, lstm_radii_by_drone)
 
          # 3e. Check convergence
          if self._admm_state.is_converged(trajectories):
@@ -205,6 +218,7 @@ class DistributedMPCCoordinator:
 
       :param drone_id: ID of the drone.
       :param iteration: Current ADMM iteration index (0-based).
+      :returns: Warm-start control sequence, or None.
       :param controls: Controls computed so far in the current timestep.
       :return: Warm-start control sequence (H, 3), or None.
       """
@@ -217,8 +231,10 @@ class DistributedMPCCoordinator:
    def _jacobi(self, drone_order: list[str], drone_by_id: dict[str, Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
                obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None,
                room_max: np.ndarray | None = None,
-               prev_controls: dict[str, np.ndarray] | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, np.ndarray]]:
+               prev_controls: dict[str, np.ndarray] | None = None,
+               lstm_radii_by_drone: dict[str, dict[str, np.ndarray]] | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, np.ndarray]]:
       """Jacobi update: all drones solve using stale neighbor data, then update all at once."""
+      lstm_radii_by_drone = lstm_radii_by_drone or {}
       new_trajectories: dict[str, np.ndarray] = {}
       new_controls: dict[str, np.ndarray] = {}
       new_velocities: dict[str, np.ndarray] = {}
@@ -233,10 +249,12 @@ class DistributedMPCCoordinator:
             for sid, msg in messages.items()
          }
 
+         lstm_radii_by_drone = lstm_radii_by_drone or {}
          u_prev = self._warm_start_controls(drone_id, iteration, prev_controls or {})
          u_opt, traj_opt, success, vel_opt = solver.solve(
             drone=drone, neighbor_trajectories=neighbor_trajectories,
             obstacles=obstacles, room_min=room_min, room_max=room_max, u_prev=u_prev,
+            lstm_radii=lstm_radii_by_drone.get(drone_id),
          )
 
          new_trajectories[drone_id] = traj_opt
@@ -252,14 +270,20 @@ class DistributedMPCCoordinator:
       return new_trajectories, new_controls, new_velocities
 
    def update_z(self, trajectories: dict[str, np.ndarray], vel_dict: dict[str, np.ndarray | None],
-                all_drones_by_id: dict[str, Drone], neighbor_pairs: list[tuple[str, str]]) -> None:
+                all_drones_by_id: dict[str, Drone], neighbor_pairs: list[tuple[str, str]],
+                lstm_radii_by_drone: dict[str, dict[str, np.ndarray]] | None = None) -> None:
+      lstm_radii_by_drone = lstm_radii_by_drone or {}
       for pair in neighbor_pairs:
          id_i, id_j = pair
          traj_i = trajectories[id_i]
          traj_j = trajectories[id_j]
 
-         radii_i = self._compute_safety_radii(all_drones_by_id[id_i], vel_dict.get(id_i))
-         radii_j = self._compute_safety_radii(all_drones_by_id[id_j], vel_dict.get(id_j))
+         # Get per-pair LSTM radii (keyed by ego -> neighbor)
+         lstm_i = lstm_radii_by_drone.get(id_i, {}).get(id_j)
+         lstm_j = lstm_radii_by_drone.get(id_j, {}).get(id_i)
+
+         radii_i = self._compute_safety_radii(all_drones_by_id[id_i], vel_dict.get(id_i), lstm_radii=lstm_i)
+         radii_j = self._compute_safety_radii(all_drones_by_id[id_j], vel_dict.get(id_j), lstm_radii=lstm_j)
          min_dist = radii_i + radii_j
 
          self._admm_state.update_z(pair, traj_i, traj_j, min_dist)
@@ -335,7 +359,8 @@ class DistributedMPCCoordinator:
       return self._neighbor_graph.get_neighbor_pairs()
 
    def _compute_priority(self, drone_id: str, trajectories: dict[str, np.ndarray],
-                         vel_dict: dict[str, np.ndarray | None], all_drones_by_id: dict[str, Drone]) -> float:
+                         vel_dict: dict[str, np.ndarray | None], all_drones_by_id: dict[str, Drone],
+                         lstm_radii_by_drone: dict[str, dict[str, np.ndarray]] | None = None) -> float:
       """Compute priority score - lower = higher priority (solve first).
 
       Drones with smaller safety margins to neighbors get higher priority.
@@ -344,6 +369,7 @@ class DistributedMPCCoordinator:
       :param trajectories: Current trajectories for all drones
       :param vel_dict: Current velocities for all drones (or None per drone)
       :param all_drones_by_id: All drones by ID for safety radius computation
+      :param lstm_radii_by_drone: Precomputed LSTM radii keyed by drone_id -> neighbor_id, or None
       :return: Priority score (lower = higher priority = solve first)
       """
       neighbors = self._neighbor_graph.get_neighbors(drone_id)
@@ -355,26 +381,39 @@ class DistributedMPCCoordinator:
       if traj_i is None:
          return float("inf")
 
-      radii_i = self._compute_safety_radii(all_drones_by_id[drone_id], vel_dict.get(drone_id))
+      lstm_radii_by_drone = lstm_radii_by_drone or {}
+      radii_i = self._compute_safety_radii(all_drones_by_id[drone_id], vel_dict.get(drone_id),
+                                           lstm_radii=lstm_radii_by_drone.get(drone_id, {}).get(next(iter(neighbors))))
 
       for neighbor_id in neighbors:
          traj_j = trajectories.get(neighbor_id)
          if traj_j is None:
             continue
-         radii_j = self._compute_safety_radii(all_drones_by_id[neighbor_id], vel_dict.get(neighbor_id))
+         lstm_j = lstm_radii_by_drone.get(neighbor_id, {}).get(drone_id)
+         radii_j = self._compute_safety_radii(all_drones_by_id[neighbor_id], vel_dict.get(neighbor_id), lstm_radii=lstm_j)
          min_dist = float(np.mean(radii_i) + np.mean(radii_j))
          dists = np.linalg.norm(traj_i - traj_j, axis=1)
          min_margin = min(min_margin, float(np.min(dists)) - min_dist)
 
       return min_margin
 
-   def _compute_safety_radii(self, drone: Drone, velocities: np.ndarray | None) -> np.ndarray:
+   def _compute_safety_radii(
+      self,
+      drone: Drone,
+      velocities: np.ndarray | None,
+      lstm_radii: "np.ndarray | None" = None,
+   ) -> np.ndarray:
       """Compute per-step safety radii for a drone.
+
+      Priority: lstm > adaptive > fixed.
 
       :param drone: the drone
       :param velocities: predicted velocities (H, 3), or None
+      :param lstm_radii: precomputed per-step LSTM radii (H,), or None
       :return: per-step safety radii (H,)
       """
+      if drone.safety_zone_mode == "lstm" and lstm_radii is not None:
+         return lstm_radii
       if velocities is not None and drone.is_adaptive:
          return np.array([drone.compute_adaptive_radius(velocities[step])
                           for step in range(self.horizon)])

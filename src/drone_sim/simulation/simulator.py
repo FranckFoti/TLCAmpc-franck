@@ -60,6 +60,10 @@ class Simulator:
    # Wall-clock seconds spent inside `step()` so far (cumulative).
    compute_time_s: float = 0.0
 
+   # LSTM trajectory prediction infrastructure (None when not configured).
+   _lstm_history: object | None = field(default=None, init=False, repr=False)
+   _lstm_provider: object | None = field(default=None, init=False, repr=False)
+
    @classmethod
    def from_config(cls, cfg: ScenarioConfig) -> "Simulator":
       # Ensure implementations are registered
@@ -138,6 +142,24 @@ class Simulator:
          room_max = p_max + margin
 
       sim = cls(dt=cfg.dt, physics=physics, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max, coordinator=coordinator)
+
+      # Instantiate LSTM history buffer and provider when model path is configured.
+      if cfg.lstm_model_path is not None:
+         from pathlib import Path
+         from drone_sim.prediction import (
+            TrajectoryHistoryBuffer,
+            LSTMModelLoader,
+            LSTMSafetyZoneProvider,
+            UncertaintyPropagator,
+         )
+         _lstm_history = TrajectoryHistoryBuffer(m=20)
+         _loader = LSTMModelLoader(Path(cfg.lstm_model_path))
+         _propagator = UncertaintyPropagator()
+         _horizon = cfg.coordinator.params.get("horizon", 5) if cfg.coordinator else 5
+         sim._lstm_history = _lstm_history
+         sim._lstm_provider = LSTMSafetyZoneProvider(
+            _loader, _propagator, _lstm_history, horizon=_horizon
+         )
 
       # Initialize traces with the start positions.
       sim.traces = {d.drone_id: [d.position().copy()] for d in sim.drones}
@@ -219,7 +241,9 @@ class Simulator:
             u_by_id = self.coordinator.solve_controls(
                                                       drones=self.drones,
                                                       obstacles=self.obstacles,
-                                                      room_min=self.room_min, room_max=self.room_max)
+                                                      room_min=self.room_min, room_max=self.room_max,
+                                                      lstm_provider=self._lstm_provider,
+                                                      )
 
          except RuntimeError as exc:
             # Mark the step as infeasible (e.g. walls/obstacles make the optimization problem infeasible) and abort this step without advancing the simulation time.
@@ -252,6 +276,10 @@ class Simulator:
             trace.append(d.position().copy())
             if len(trace) > self.trace_len:
                del trace[:-self.trace_len]
+
+            # Update LSTM history buffer with the new state after clamping.
+            if self._lstm_history is not None:
+               self._lstm_history.update(d.drone_id, d.x.copy())
 
          self.last_collisions = self._compute_collisions()
 

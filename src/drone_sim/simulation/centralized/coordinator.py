@@ -45,12 +45,22 @@ class CentralMPCGlobalCoordinator:
       )
 
    def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None = None,
-         room_max: np.ndarray | None = None) -> dict[str, np.ndarray]:
+         room_max: np.ndarray | None = None, lstm_provider: object | None = None) -> dict[str, np.ndarray]:
+
+      # Compute lstm_radii from provider if available (once before SLSQP).
+      # Central MPC uses evaluate_multi() which takes a flat dict keyed by drone_id.
+      # LSTMSafetyZoneProvider.compute_neighbor_safety_radii() returns exactly that format.
+      lstm_radii: dict | None = None
+      if lstm_provider is not None:
+         all_ids = [d.drone_id for d in drones]
+         r_floor_by_id = {d.drone_id: d.safety_zone for d in drones}
+         lstm_radii = lstm_provider.compute_neighbor_safety_radii(all_ids, r_floor_by_id)
 
       controls, u_sequences = self._solver.solve(
          drones=drones, obstacles=obstacles,
          room_min=room_min, room_max=room_max,
          u_prev=self._u_prev,
+         lstm_radii=lstm_radii,
       )
 
       # Store returned u_sequences for warm-start next call

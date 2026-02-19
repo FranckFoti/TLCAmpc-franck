@@ -52,6 +52,7 @@ class AsyncLocalSolver:
         convergence_threshold: float = 1e-3,
         stale_threshold_sec: float = 1.0,
         u_prev: np.ndarray | None = None,
+        lstm_radii: "dict[str, np.ndarray] | None" = None,
     ) -> None:
         """Initialize AsyncLocalSolver.
 
@@ -63,6 +64,9 @@ class AsyncLocalSolver:
         :param convergence_threshold: Convergence threshold (placeholder for Phase 17)
         :param stale_threshold_sec: Maximum age of neighbor data in seconds
         :param u_prev: Warm-start control sequence from previous timestep (H, 3) or None
+        :param lstm_radii: Pre-computed LSTM safety radii snapshot from main thread.
+            Dict mapping neighbor_id -> np.ndarray(H,) or None when lstm_provider is None.
+            Set once at construction time; solver threads read it as-is (no mutation).
         """
         self.drone = drone
         self.mailbox = mailbox
@@ -75,6 +79,7 @@ class AsyncLocalSolver:
 
         # Warm-start state
         self.u_prev: np.ndarray | None = u_prev
+        self.lstm_radii: "dict[str, np.ndarray] | None" = lstm_radii
         self.traj_prev: np.ndarray | None = None
 
         # Metrics
@@ -156,6 +161,7 @@ class AsyncLocalSolver:
                 room_min=room_min,
                 room_max=room_max,
                 u_prev=self.u_prev,
+                lstm_radii=self.lstm_radii,
             )
 
             if not success:

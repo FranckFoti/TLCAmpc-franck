@@ -76,6 +76,7 @@ class ThreadedMPCCoordinator:
         obstacles: list[tuple[np.ndarray, np.ndarray]],
         room_min: np.ndarray | None = None,
         room_max: np.ndarray | None = None,
+        lstm_provider: object | None = None,
     ) -> dict[str, np.ndarray]:
         """Solve for drone controls using asynchronous threaded DMPC.
 
@@ -100,6 +101,19 @@ class ThreadedMPCCoordinator:
         positions = {d.drone_id: np.asarray(d.x[:3], dtype=float) for d in drones}
         self._neighbor_graph.update(positions)
 
+        # Pre-compute LSTM radii in the main thread before spawning solver threads.
+        # Threads receive a read-only numpy dict snapshot — no concurrent provider calls.
+        all_drones_by_id = {d.drone_id: d for d in drones}
+        lstm_radii_by_drone: dict[str, dict[str, np.ndarray]] = {}
+        if lstm_provider is not None:
+            for drone in opt_drones:
+                neighbors = list(self._neighbor_graph.get_neighbors(drone.drone_id))
+                if neighbors:
+                    r_floor = {nid: all_drones_by_id[nid].safety_zone for nid in neighbors}
+                    lstm_radii_by_drone[drone.drone_id] = lstm_provider.compute_neighbor_safety_radii(
+                        neighbors, r_floor
+                    )
+
         # 2. Create shared mailbox for this solve
         mailbox = ThreadSafeMailbox()
 
@@ -123,6 +137,7 @@ class ThreadedMPCCoordinator:
                 max_iterations=self.max_iterations,
                 convergence_threshold=self.convergence_threshold,
                 u_prev=u_prev,
+                lstm_radii=lstm_radii_by_drone.get(drone.drone_id),
             )
             async_solvers[drone.drone_id] = async_solver
 
