@@ -60,6 +60,10 @@ class Drone:
    # Cached u_max_scalar for adaptive radius computation (set lazily)
    _cached_u_max_scalar: float | None = field(default=None, init=False, repr=False)
 
+   # Safety zone mode: "fixed", "adaptive", or "lstm".
+   # Drives _safety_radius() branch selection in constraint evaluation.
+   safety_zone_mode: str = "fixed"
+
    @property
    def is_adaptive(self) -> bool:
       """Whether this drone uses velocity-dependent adaptive safety zones."""

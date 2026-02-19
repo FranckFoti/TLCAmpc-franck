@@ -37,6 +37,7 @@ def _make_drone(
     cons_stop: float = 0.0,
     v_max: float = 5.0,
     alpha: float | None = None,
+    safety_zone_mode: str = "fixed",
 ) -> Drone:
     """Helper to create a minimal Drone for constraint testing."""
     if x is None:
@@ -57,6 +58,7 @@ def _make_drone(
         x=np.asarray(x, dtype=float).reshape(6),
         route=Route(waypoints=[], target=np.asarray(target, dtype=float).reshape(3)),
         alpha=alpha,
+        safety_zone_mode=safety_zone_mode,
     )
 
 
@@ -1069,3 +1071,147 @@ class TestPerStepNeighborVelocity:
         assert result_none[0] == pytest.approx(4.8)
         # Zero vel => ego safety_zone(0.1) + neighbor adaptive(0.2) = 0.3, margin = 4.7
         assert result_zero[0] == pytest.approx(4.7)
+
+
+# ---------------------------------------------------------------
+# LSTM Safety Radius Branch (Phase 23)
+# ---------------------------------------------------------------
+
+class _FakeLSTMProvider:
+    """Hand-rolled fake implementing the LSTMSafetyZoneProvider interface.
+    Returns constant per-step radii for all neighbors.
+    """
+    def __init__(self, radius: float, horizon: int):
+        self._radius = radius
+        self._horizon = horizon
+
+    def compute_neighbor_safety_radii(
+        self,
+        neighbor_ids: list[str],
+        r_floor_by_id: dict[str, float],
+    ) -> dict[str, np.ndarray]:
+        return {nid: np.full(self._horizon, self._radius) for nid in neighbor_ids}
+
+
+class TestSafetyRadiusLSTMBranch:
+    """Tests for _safety_radius() LSTM branch (Phase 23)."""
+
+    def test_lstm_mode_with_radius_returns_lstm_radius(self):
+        """LSTM mode + lstm_radius provided: return lstm_radius directly."""
+        from drone_sim.domain.constraints import _safety_radius
+        drone = _make_drone(safety_zone=1.0, safety_zone_mode="lstm")
+        result = _safety_radius(drone, velocity=None, lstm_radius=2.5)
+        assert result == pytest.approx(2.5)
+
+    def test_lstm_mode_no_radius_falls_back_to_safety_zone(self):
+        """LSTM mode + lstm_radius=None (warmup): fall back to drone.safety_zone."""
+        from drone_sim.domain.constraints import _safety_radius
+        drone = _make_drone(safety_zone=1.0, safety_zone_mode="lstm")
+        result = _safety_radius(drone, velocity=None, lstm_radius=None)
+        assert result == pytest.approx(1.0)
+
+    def test_fixed_mode_unchanged(self):
+        """Fixed mode: returns safety_zone regardless of velocity or lstm_radius."""
+        from drone_sim.domain.constraints import _safety_radius
+        drone = _make_drone(safety_zone=1.5)  # safety_zone_mode="fixed" by default
+        result = _safety_radius(drone, velocity=np.array([4.0, 0.0, 0.0]))
+        assert result == pytest.approx(1.5)
+
+    def test_adaptive_mode_unchanged(self):
+        """Adaptive mode: velocity-dependent radius still works."""
+        from drone_sim.domain.constraints import _safety_radius
+        drone = _make_drone(safety_zone=1.0, alpha=0.5)  # safety_zone_mode="fixed" by default
+        vel = np.array([4.0, 0.0, 0.0])
+        result = _safety_radius(drone, velocity=vel)
+        # alpha=0.5, ||v||^2=16, u_max_scalar=3.0, s_stop=8/3, r=0.2+0.5*(8/3)=1.5333
+        expected = 0.2 + 0.5 * (16.0 / (2.0 * 3.0))
+        assert result == pytest.approx(expected)
+
+
+class TestLSTMConstraintWiring:
+    """Tests that lstm_radii kwarg threads through constraint evaluation."""
+
+    def test_evaluate_single_lstm_radii_used_for_neighbor(self):
+        """evaluate_single uses lstm_radii for neighbor safety radius.
+
+        Drone at origin (fixed mode, safety_zone=0.5).
+        Neighbor at (5,0,0), lstm_radius=1.0 for all steps.
+        Expected margin: 5.0 - (0.5 + 1.0) = 3.5
+        """
+        horizon = 1
+        constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
+        drone = _make_drone(safety_zone=0.5)  # fixed mode
+        pred_pos = np.array([[0.0, 0.0, 0.0]])
+        neighbor_traj = np.array([[5.0, 0.0, 0.0]])
+        neighbors = {"n1": (neighbor_traj, None)}
+        lstm_radii = {"n1": np.full(horizon, 1.0)}
+
+        result = constraints.evaluate_single(drone, pred_pos, neighbors, np.array([]),
+                                             lstm_radii=lstm_radii)
+
+        # ego: safety_zone=0.5 (fixed, no lstm), neighbor: lstm_radius=1.0
+        assert result[0] == pytest.approx(5.0 - (0.5 + 1.0))
+
+    def test_evaluate_single_no_lstm_radii_unchanged(self):
+        """evaluate_single with lstm_radii=None (default) behaves identically to before."""
+        horizon = 1
+        constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
+        drone = _make_drone(safety_zone=0.5)
+        pred_pos = np.array([[0.0, 0.0, 0.0]])
+        neighbor_traj = np.array([[5.0, 0.0, 0.0]])
+        neighbors = {"n1": (neighbor_traj, None)}
+
+        result_default = constraints.evaluate_single(drone, pred_pos, neighbors, np.array([]))
+        result_none = constraints.evaluate_single(drone, pred_pos, neighbors, np.array([]),
+                                                  lstm_radii=None)
+
+        np.testing.assert_array_almost_equal(result_default, result_none)
+
+    def test_evaluate_multi_lstm_radii_both_drones(self):
+        """evaluate_multi applies lstm_radii for both drones in a pair.
+
+        d1 at origin (lstm mode, safety_zone=0.5, lstm_radius=1.0).
+        d2 at (6,0,0) (lstm mode, safety_zone=0.5, lstm_radius=1.5).
+        dist=6.0, threshold=1.0+1.5=2.5, margin=3.5
+        """
+        horizon = 1
+        constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
+        d1 = _make_drone("d1", safety_zone=0.5, safety_zone_mode="lstm")
+        d2 = _make_drone("d2", safety_zone=0.5, safety_zone_mode="lstm")
+        drones = [d1, d2]
+        pred_pos = {
+            "d1": np.array([[0.0, 0.0, 0.0]]),
+            "d2": np.array([[6.0, 0.0, 0.0]]),
+        }
+        lstm_radii = {
+            "d1": np.full(horizon, 1.0),
+            "d2": np.full(horizon, 1.5),
+        }
+
+        result = constraints.evaluate_multi(drones, pred_pos, np.array([]), lstm_radii=lstm_radii)
+
+        assert result.shape == (horizon,)
+        assert result[0] == pytest.approx(6.0 - (1.0 + 1.5))
+
+    def test_evaluate_multi_missing_id_in_lstm_radii_falls_back(self):
+        """If a drone_id is absent from lstm_radii, falls back to safety_zone.
+
+        d1 has lstm_radii (1.0), d2 does not.
+        d2 fallback: safety_zone_mode='lstm', lstm_radius=None -> drone.safety_zone=0.5
+        dist=6.0, threshold=1.0+0.5=1.5, margin=4.5
+        """
+        horizon = 1
+        constraints = MovingObstacleAvoidanceConstraints(horizon=horizon)
+        d1 = _make_drone("d1", safety_zone=0.5, safety_zone_mode="lstm")
+        d2 = _make_drone("d2", safety_zone=0.5, safety_zone_mode="lstm")
+        drones = [d1, d2]
+        pred_pos = {
+            "d1": np.array([[0.0, 0.0, 0.0]]),
+            "d2": np.array([[6.0, 0.0, 0.0]]),
+        }
+        lstm_radii = {"d1": np.full(horizon, 1.0)}  # d2 absent
+
+        result = constraints.evaluate_multi(drones, pred_pos, np.array([]), lstm_radii=lstm_radii)
+
+        # d2 absent -> lstm_radius=None -> fallback to safety_zone=0.5
+        assert result[0] == pytest.approx(6.0 - (1.0 + 0.5))

@@ -58,14 +58,22 @@ def _velocity_at_step(pred_vel: np.ndarray | None, step: int) -> np.ndarray | No
    return None
 
 
-def _safety_radius(drone: Drone, velocity: np.ndarray | None) -> float:
+def _safety_radius(drone: Drone, velocity: np.ndarray | None, lstm_radius: float | None = None) -> float:
    """Compute the safety radius for a drone at a given velocity.
 
    :param drone: the drone to compute the radius for.
    :param velocity: 3D velocity vector, or ``None`` to use the fixed safety zone.
-   :return: adaptive radius when the drone is adaptive and velocity is provided,
+   :param lstm_radius: pre-computed LSTM radius for a single step, or ``None``.
+                       Only used when ``drone.safety_zone_mode == "lstm"``.
+   :return: LSTM radius when mode is "lstm" and lstm_radius is provided;
+            drone.safety_zone when mode is "lstm" and lstm_radius is None (warmup);
+            adaptive radius when the drone is adaptive and velocity is provided;
             otherwise the fixed ``drone.safety_zone``.
    """
+   if drone.safety_zone_mode == "lstm":
+      if lstm_radius is not None:
+         return float(lstm_radius)
+      return drone.safety_zone
    if velocity is not None and drone.is_adaptive:
       return drone.compute_adaptive_radius(velocity)
    return drone.safety_zone
@@ -141,6 +149,7 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]],
       values: np.ndarray,
       pred_vel: np.ndarray | None = None,
+      lstm_radii: dict[str, np.ndarray] | None = None,
    ) -> np.ndarray:
       """Evaluate moving obstacle avoidance constraints for a single drone.
 
@@ -152,9 +161,11 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       :param values: combined constraint values to append to.
       :param pred_vel: optional predicted velocities (shape: (horizon, 3)).
                        When provided and the drone is adaptive, per-step adaptive radii are used.
+      :param lstm_radii: optional dict mapping neighbor_id to per-step LSTM radii (H,).
+                         When provided, overrides neighbor safety radius for LSTM-mode drones.
       :return: updated values list.
       """
-      result = self._evaluate(drone, pred_pos, neighbor_trajectories, pred_vel=pred_vel)
+      result = self._evaluate(drone, pred_pos, neighbor_trajectories, pred_vel=pred_vel, lstm_radii=lstm_radii)
       return np.concatenate([values, result])
 
    def evaluate_multi(
@@ -163,6 +174,7 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       pred_pos: dict[str, np.ndarray],
       values: np.ndarray,
       pred_vel: dict[str, np.ndarray] | None = None,
+      lstm_radii: dict[str, np.ndarray] | None = None,
    ) -> np.ndarray:
       """Evaluate collision avoidance for all drone pairs.
 
@@ -175,6 +187,8 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       :param pred_vel: optional dict mapping drone_id to predicted velocity arrays
                        (shape per drone: (horizon, 3)). When provided, adaptive
                        drones use per-step adaptive radii.
+      :param lstm_radii: optional dict mapping drone_id to per-step LSTM radii (H,).
+                         When provided, overrides safety radius for LSTM-mode drones.
       :return: updated values list.
       """
       parts = []
@@ -187,10 +201,14 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
             vel_i = pred_vel[drone_i.drone_id] if pred_vel is not None else None
             vel_j = pred_vel[drone_j.drone_id] if pred_vel is not None else None
 
-            dists = np.linalg.norm(traj_i - traj_j, axis=1)
-            radii_i = _safety_radii(drone_i, vel_i, self._horizon)
-            radii_j = _safety_radii(drone_j, vel_j, self._horizon)
-            result = dists - (radii_i + radii_j + drone_i.cons_stop + drone_j.cons_stop)
+            result = np.zeros(self._horizon)
+            for step in range(self._horizon):
+               lstm_r_i = float(lstm_radii[drone_i.drone_id][step]) if (lstm_radii and drone_i.drone_id in lstm_radii) else None
+               lstm_r_j = float(lstm_radii[drone_j.drone_id][step]) if (lstm_radii and drone_j.drone_id in lstm_radii) else None
+               safety_i = _safety_radius(drone_i, _velocity_at_step(vel_i, step), lstm_radius=lstm_r_i)
+               safety_j = _safety_radius(drone_j, _velocity_at_step(vel_j, step), lstm_radius=lstm_r_j)
+               dist = float(np.linalg.norm(traj_i[step] - traj_j[step]))
+               result[step] = dist - (safety_i + safety_j + drone_i.cons_stop + drone_j.cons_stop)
             parts.append(result)
       return np.concatenate([values, *parts])
 
@@ -200,6 +218,7 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       pred_pos: np.ndarray,
       neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]],
       pred_vel: np.ndarray | None = None,
+      lstm_radii: dict[str, np.ndarray] | None = None,
    ):
       """Evaluate collision constraints against neighbor trajectories.
 
@@ -210,17 +229,22 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
              Neighbor adaptive radii are computed using the ego drone's config
              ("same drone type" assumption).
       :param pred_vel: optional predicted velocities for the ego drone (horizon, 3).
+      :param lstm_radii: optional dict mapping neighbor_id to per-step LSTM radii (H,).
+                         When provided, overrides neighbor safety radius for LSTM-mode drones.
       :return: constraint margin array.
       """
       parts = []
-      ego_radii = _safety_radii(drone, pred_vel, self._horizon)
-      # For non-adaptive drones, all radii are identical — compute once
-      fixed_radii = None if drone.is_adaptive else ego_radii
-      for neighbor_traj, neighbor_vel in neighbor_trajectories.values():
+      for neighbor_id, (neighbor_traj, neighbor_vel) in neighbor_trajectories.items():
          neighbor_traj = np.asarray(neighbor_traj, dtype=float).reshape((self._horizon, 3))
-         dists = np.linalg.norm(pred_pos - neighbor_traj, axis=1)
-         neighbor_radii = fixed_radii if fixed_radii is not None else _safety_radii(drone, neighbor_vel, self._horizon)
-         result = dists - (ego_radii + neighbor_radii)
+         result = np.zeros(self._horizon)
+         for step in range(self._horizon):
+            safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
+            if lstm_radii and neighbor_id in lstm_radii:
+               neighbor_safety = float(lstm_radii[neighbor_id][step])
+            else:
+               neighbor_safety = _safety_radius(drone, _velocity_at_step(neighbor_vel, step))
+            dist = float(np.linalg.norm(pred_pos[step] - neighbor_traj[step]))
+            result[step] = dist - (safety + neighbor_safety)
          parts.append(result)
       if not parts:
          return np.zeros(0)

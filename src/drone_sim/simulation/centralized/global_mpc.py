@@ -166,7 +166,7 @@ class GlobalMPCSolver:
       return float(sum(ctrl.central_cost(u[i], drone) for i, (drone, ctrl) in enumerate(zip(drones, controllers)))) # type: ignore[attr-defined]
 
    def _constraints(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None,
-                    room_max: np.ndarray | None) -> np.ndarray:
+                    room_max: np.ndarray | None, lstm_radii: dict[str, np.ndarray] | None = None) -> np.ndarray:
       """Inequality constraints c(u) >= 0 for collision, obstacle, room, and velocity limits."""
       u = self._unpack(u_flat, len(drones))
       predicted_states = self._predict_states(drones, u)
@@ -174,7 +174,7 @@ class GlobalMPCSolver:
       pred_vel = {drone.drone_id: predicted_states[i, :, 3:6] for i, drone in enumerate(drones)}
       vals = np.array([], dtype=float)
 
-      vals = self._collision_c.evaluate_multi(drones, pred_pos, vals, pred_vel=pred_vel)
+      vals = self._collision_c.evaluate_multi(drones, pred_pos, vals, pred_vel=pred_vel, lstm_radii=lstm_radii)
       vals = self._obstacle_c.evaluate_multi(drones, pred_pos, obstacles, vals, pred_vel=pred_vel)
 
       if room_min is not None and room_max is not None:

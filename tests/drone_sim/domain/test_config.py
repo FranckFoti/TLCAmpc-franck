@@ -148,6 +148,40 @@ class TestDroneConfig:
       assert cfg.cons_stop == 0.1
 
 
+class TestDroneConfigSafetyZoneMode:
+   """Tests for DroneConfig.safety_zone_mode field (Phase 23)."""
+
+   def test_default_is_fixed(self):
+      """Default safety_zone_mode is 'fixed' — backward compatible."""
+      cfg = DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0])
+      assert cfg.safety_zone_mode == "fixed"
+
+   def test_accepts_adaptive_mode(self):
+      """safety_zone_mode='adaptive' is valid."""
+      cfg = DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0],
+                        safety_zone_mode="adaptive")
+      assert cfg.safety_zone_mode == "adaptive"
+
+   def test_accepts_lstm_mode(self):
+      """safety_zone_mode='lstm' is valid."""
+      cfg = DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0],
+                        safety_zone_mode="lstm")
+      assert cfg.safety_zone_mode == "lstm"
+
+   def test_invalid_mode_raises(self):
+      """Unknown safety_zone_mode raises ValidationError."""
+      with pytest.raises(ValidationError):
+         DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0],
+                     safety_zone_mode="unknown_mode")
+
+   def test_existing_configs_unaffected(self):
+      """Existing DroneConfig without safety_zone_mode still works (backward compat)."""
+      cfg = DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0],
+                        radius=0.3, safety_zone=1.5, cons_stop=0.1, alpha=0.5)
+      assert cfg.safety_zone_mode == "fixed"  # default
+      assert cfg.alpha == 0.5  # existing field unchanged
+
+
 class TestObstacleConfig:
    """Tests for ObstacleConfig model."""
 
@@ -279,3 +313,22 @@ class TestScenarioConfig:
          drones=drones,
       )
       assert len(cfg.drones) == 100
+
+   def test_scenario_config_default_lstm_model_path_is_none(self):
+      """Default lstm_model_path is None — backward compatible."""
+      cfg = ScenarioConfig(
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         drones=[DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0])]
+      )
+      assert cfg.lstm_model_path is None
+
+   def test_scenario_config_accepts_lstm_model_path(self):
+      """ScenarioConfig accepts a string lstm_model_path."""
+      cfg = ScenarioConfig(
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         drones=[DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0])],
+         lstm_model_path="/path/to/model.pt"
+      )
+      assert cfg.lstm_model_path == "/path/to/model.pt"

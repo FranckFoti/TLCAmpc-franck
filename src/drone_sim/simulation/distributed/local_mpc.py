@@ -46,7 +46,7 @@ class LocalMPCSolver:
 
    def solve(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]],
              obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None, room_max: np.ndarray | None = None,
-             u_prev: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, bool, np.ndarray]:
+             u_prev: np.ndarray | None = None, lstm_radii: dict[str, np.ndarray] | None = None) -> tuple[np.ndarray, np.ndarray, bool, np.ndarray]:
       """ Solve local MPC problem for a single drone.
 
       :param drone: Drone object with state, route, controller, and physics
@@ -56,6 +56,8 @@ class LocalMPCSolver:
       :param room_min: Room lower bounds (3,) or None
       :param room_max: Room upper bounds (3,) or None
       :param u_prev: Previous control sequence (H,3) for warm-start
+      :param lstm_radii: Optional dict mapping neighbor_id to per-step LSTM radii (H,).
+                         Passed to collision constraints for LSTM-mode safety radius selection.
       :return:
          u_opt: Optimized control sequence (horizon, 3)
          traj_opt: Optimized position trajectory (horizon, 3)
@@ -124,7 +126,7 @@ class LocalMPCSolver:
             return _cache_g[0]
 
          parts = []
-         c = collision_c._evaluate(drone, positions, neighbor_trajectories, pred_vel=velocities)
+         c = collision_c._evaluate(drone, positions, neighbor_trajectories, pred_vel=velocities, lstm_radii=lstm_radii)
          if len(c) > 0:
             parts.append(c)
          c = obstacle_c._evaluate(drone, positions, obstacles, pred_vel=velocities)

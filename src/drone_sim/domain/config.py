@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -45,6 +45,11 @@ class DroneConfig(BaseModel):
    # safety radius: r(t) = r_min + alpha * ||v||^2 / (2 * U_max).
    # When None, the fixed safety_zone is used instead.
    alpha: float | None = None
+
+   # Safety zone mode. "fixed" uses the static safety_zone, "adaptive" uses
+   # velocity-dependent radius (requires alpha), "lstm" uses LSTM-predicted radii.
+   # Default "fixed" is backward compatible with all existing configs.
+   safety_zone_mode: Literal["fixed", "adaptive", "lstm"] = "fixed"
 
    # Colors used by the renderer. Each field accepts either:
    # - a matplotlib-compatible color string (e.g. "red", "tab:blue", "#ff00aa")
@@ -95,3 +100,7 @@ class ScenarioConfig(BaseModel):
 
    # Optional visualization bounds.
    room: RoomConfig | None = None
+
+   # Path to a trained LSTM model checkpoint (.pt file). Required when any
+   # drone has safety_zone_mode="lstm". Defaults to None for backward compat.
+   lstm_model_path: str | None = None

@@ -107,7 +107,8 @@ class Simulator:
          drones.append(Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone,
                              cons_stop=drone_cfg.cons_stop, color=drone_color, safety_color=safety_color,
                              trace_color=trace_color, controller=controller, physics=drone_physics,
-                             x=x0, route=route, alpha=drone_cfg.alpha))
+                             x=x0, route=route, alpha=drone_cfg.alpha,
+                             safety_zone_mode=drone_cfg.safety_zone_mode))
 
       obstacles = [(np.asarray(o.center, dtype=float), np.asarray(o.half_extents, dtype=float)) for o in cfg.obstacles]
 
