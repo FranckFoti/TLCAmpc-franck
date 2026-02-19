@@ -71,7 +71,7 @@ def main():
          print(f"FAILED for N={n}: {e}")
          failed.append(n)
 
-   print("\n\n_PREDEFINED_PATTERNS = {")
+   print("\n\nPREDEFINED_PATTERNS = {")
    for n in sorted(patterns.keys()):
       print(f"    {n}: [")
       for (start, target) in patterns[n]:

@@ -7,7 +7,7 @@ from typing import Iterable
 import numpy as np
 
 from drone_sim.simulation.simulator import Simulator
-from tools import _build_scenario
+from tools.utility.scenario_creator import create_scenario
 
 
 @dataclass
@@ -36,7 +36,7 @@ def _all_routes_finished(sim: Simulator, pos_tol: float = 0.2, vel_tol: float = 
 
 def run_single_scenario(*, num_drones: int, horizon: int, max_wall_time_s: float = 120.0,
                         max_steps: int = 10_000) -> ScenarioResult:
-   scenario = _build_scenario(num_drones=num_drones, horizon=horizon)
+   scenario = create_scenario(n_drones=num_drones, horizon=horizon)
 
    t0 = time.perf_counter()
    try:

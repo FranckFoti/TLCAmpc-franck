@@ -18,7 +18,8 @@ from drone_sim.api.render import render_png
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
 from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
-from tools import _build_scenario, _all_drones_reached_destination
+from tools.utility.scenario_creator import create_scenario
+from tools.utility.helper import all_drones_reached_destination
 
 
 def load_parametrized_json(path: str | Path, params: dict[str, str] | None = None) -> dict[str, Any]:
@@ -49,7 +50,7 @@ def create_scenario(config_path: str | Path | None, params: dict[str, str] | Non
       if num_str is None or hor_str is None:
          _die("When --config has no path, you must provide both num_drones=<int> and horizon=<int> via --param.")
 
-      scenario = _build_scenario(num_drones=int(num_str), horizon=int(hor_str))
+      scenario = create_scenario(n_drones=int(num_str), horizon=int(hor_str))
    else:
       # Load raw JSON (with optional template substitution) and validate as ScenarioConfig.
       cfg_json = load_parametrized_json(config_path, params=params)
@@ -147,7 +148,7 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
       if sleep_s > 0:
          time.sleep(sleep_s)
 
-      all_reached = _all_drones_reached_destination(sim.drones)
+      all_reached = all_drones_reached_destination(sim.drones)
       print(f"All drones reached: {all_reached}")
 
    plt.ioff()
