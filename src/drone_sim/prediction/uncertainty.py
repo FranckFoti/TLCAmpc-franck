@@ -10,7 +10,10 @@ per Phase 22 specification (Pitfall #7).
 """
 from __future__ import annotations
 
+import logging
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 
 class UncertaintyPropagator:
@@ -53,6 +56,23 @@ class UncertaintyPropagator:
       sigma_pos = sigma[:, :3]                         # (T, 3) position only
       lambda_max = np.max(sigma_pos, axis=1) ** 2      # (T,) largest eigenvalue of diag cov
       r_lstm = self._k_alpha * np.sqrt(lambda_max) + self._r_ego  # (T,)
+      _log.debug(
+          "UncertaintyPropagator: lambda_max mean=%.4f r_lstm mean=%.4f max=%.4f min=%.4f r_floor=%.3f",
+          float(lambda_max.mean()),
+          float(r_lstm.mean()),
+          float(r_lstm.max()),
+          float(r_lstm.min()),
+          r_floor,
+      )
       r_safety = np.maximum(r_lstm, r_floor)           # floor: Pitfall #9
       r_safety = np.minimum(r_safety, self._r_safety_max)  # cap: Pitfall #8
+      floor_dominated = int(np.sum(r_lstm < r_floor))
+      _log.debug(
+          "UncertaintyPropagator: r_safety mean=%.3f max=%.3f min=%.3f | floor_dominated=%d/%d steps",
+          float(r_safety.mean()),
+          float(r_safety.max()),
+          float(r_safety.min()),
+          floor_dominated,
+          len(r_safety),
+      )
       return r_safety

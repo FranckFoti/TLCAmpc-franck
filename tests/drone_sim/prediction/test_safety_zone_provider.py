@@ -182,3 +182,105 @@ class TestLSTMSafetyZoneProvider:
       # Should fall back to np.full(5, 1.0) with default r_floor=1.0
       np.testing.assert_array_almost_equal(result["unknown_drone"], np.full(5, 1.0))
       assert result["unknown_drone"].shape == (5,)
+
+
+class TestLSTMSafetyZoneProviderLookAhead:
+   """Verify that look_ahead selects the correct sigma step.
+
+   Uses a mock model that returns sigma growing linearly with step index:
+     sigma[t] = sigma_min + t * step_size
+   This makes it easy to verify which step index is being used.
+   """
+
+   def _make_provider_with_mock_model(
+      self,
+      horizon: int,
+      look_ahead: int | None,
+      T: int = 80,
+      sigma_min: float = 0.01,
+      sigma_step: float = 0.01,
+   ):
+      """Create a provider with a mock LSTM model returning growing sigma."""
+      import numpy as np
+      import torch
+      from unittest.mock import MagicMock
+      from drone_sim.prediction.safety_zone_provider import LSTMSafetyZoneProvider
+      from drone_sim.prediction.uncertainty import UncertaintyPropagator
+      from drone_sim.prediction.history_buffer import TrajectoryHistoryBuffer
+
+      # Build a sigma profile that grows linearly: sigma[t] = sigma_min + t * sigma_step
+      # At step 19 (look_ahead=20): sigma_pos = 0.01 + 19 * 0.01 = 0.20
+      # At step 0 (look_ahead=None, uses first 4): sigma_pos ≈ 0.01–0.04
+      sigma_profile = np.zeros((T, 6))
+      for t in range(T):
+         sigma_profile[t, :] = sigma_min + t * sigma_step
+
+      # Mock the model: returns (mu, sigma) as tensors
+      mock_model = MagicMock()
+      mu_out = torch.zeros(1, T, 6)
+      sigma_out = torch.tensor(sigma_profile, dtype=torch.float32).unsqueeze(0)  # (1, T, 6)
+      mock_model.return_value = (mu_out, sigma_out)
+
+      # Mock loader
+      mock_loader = MagicMock()
+      mock_loader.model = mock_model
+
+      propagator = UncertaintyPropagator(k_alpha=1.96, r_ego=0.2, r_safety_max=5.0)
+
+      # Buffer with m=1 to always return a window (avoid buffer_not_full)
+      buffer = TrajectoryHistoryBuffer(m=1)
+      buffer.update("drone-1", np.zeros(6))
+
+      return LSTMSafetyZoneProvider(
+         mock_loader, propagator, buffer, horizon=horizon, look_ahead=look_ahead
+      )
+
+   def test_default_look_ahead_none_uses_first_steps(self):
+      """look_ahead=None uses sigma[:horizon] — first H steps, small sigma."""
+      import numpy as np
+
+      H = 4
+      provider = self._make_provider_with_mock_model(horizon=H, look_ahead=None)
+      # sigma[0:4, :3] = 0.01, 0.02, 0.03, 0.04 → r_lstm ≈ 0.21..0.28 < r_floor=0.6
+      result = provider.compute_neighbor_safety_radii(["drone-1"], {"drone-1": 0.6})
+      r = result["drone-1"]
+      assert r.shape == (H,)
+      # With sigma_pos[0:4] = 0.01..0.04, all r_lstm < 0.6 → floor dominates
+      np.testing.assert_allclose(r, 0.6, rtol=1e-4)
+
+   def test_look_ahead_20_uses_step_19_sigma(self):
+      """look_ahead=20 uses sigma[19] — larger sigma that may exceed floor."""
+      import numpy as np
+
+      H = 4
+      # sigma[19, :3] = 0.01 + 19 * 0.01 = 0.20
+      # r_lstm = 1.96 * 0.20 + 0.2 = 0.592 — still just below r_floor=0.6
+      # Use look_ahead=21 (step 20): sigma[20, :3] = 0.21 → r_lstm = 1.96*0.21+0.2 = 0.612 > 0.6
+      provider = self._make_provider_with_mock_model(
+         horizon=H, look_ahead=21, sigma_step=0.01
+      )
+      result = provider.compute_neighbor_safety_radii(["drone-1"], {"drone-1": 0.6})
+      r = result["drone-1"]
+      assert r.shape == (H,)
+      # sigma[20] = 0.21, r_lstm = 0.612 > r_floor=0.6 → NOT floor dominated
+      assert np.all(r > 0.6), (
+         f"Expected look_ahead=21 to produce r > r_floor=0.6 (r_lstm~0.612), got {r}"
+      )
+      # All H steps should be equal (tiled from the same step)
+      np.testing.assert_allclose(r, r[0], rtol=1e-5,
+         err_msg="look_ahead tiles the same sigma across all H steps — radii must be equal")
+
+   def test_look_ahead_clamps_to_T(self):
+      """look_ahead > T clamps to last step without error."""
+      import numpy as np
+
+      T = 80
+      provider = self._make_provider_with_mock_model(
+         horizon=4, look_ahead=T + 100, T=T  # way beyond T
+      )
+      # Should not raise; clamps to sigma[T-1]
+      result = provider.compute_neighbor_safety_radii(["drone-1"], {"drone-1": 0.6})
+      r = result["drone-1"]
+      assert r.shape == (4,)
+      # sigma[79] = 0.01 + 79 * 0.01 = 0.80 → r_lstm = 1.96*0.80+0.2 = 1.768 >> 0.6
+      assert np.all(r > 1.0), f"Expected clamped step 79 to give large r, got {r}"

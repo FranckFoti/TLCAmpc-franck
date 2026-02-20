@@ -158,7 +158,9 @@ class Simulator:
          _horizon = cfg.coordinator.params.get("horizon", 5) if cfg.coordinator else 5
          sim._lstm_history = _lstm_history
          sim._lstm_provider = LSTMSafetyZoneProvider(
-            _loader, _propagator, _lstm_history, horizon=_horizon
+            _loader, _propagator, _lstm_history,
+            horizon=_horizon,
+            look_ahead=cfg.lstm_look_ahead,
          )
 
       # Initialize traces with the start positions.

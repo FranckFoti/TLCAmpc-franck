@@ -104,3 +104,11 @@ class ScenarioConfig(BaseModel):
    # Path to a trained LSTM model checkpoint (.pt file). Required when any
    # drone has safety_zone_mode="lstm". Defaults to None for backward compat.
    lstm_model_path: str | None = None
+
+   # Look-ahead step index for LSTM uncertainty extraction (1-indexed).
+   # When None, uses sigma[:horizon] (first H steps — small near-term sigma).
+   # When set to N, uses sigma[N-1] (0-indexed) tiled across all H steps.
+   # sigma grows with autoregressive step count: look_ahead=20 gives ~T/4
+   # accumulated uncertainty, typically 3-5x larger than first-step sigma.
+   # Start with 20 for H=4, T=80 models; increase if floor still dominates.
+   lstm_look_ahead: int | None = None
