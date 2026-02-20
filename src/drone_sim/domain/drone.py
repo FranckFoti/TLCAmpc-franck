@@ -62,11 +62,15 @@ class Drone:
 
    # Safety zone mode: "fixed", "adaptive", or "lstm".
    # Drives _safety_radius() branch selection in constraint evaluation.
+   # TODO: adaptive is not enough, we have velocity dependent safety zones and uncertainty safety zones ... switch that behavior,
+   #  so all adaptive safety_zone are "adaptive" and then be able to check if drone is velocity dependent or uncertainty dependent. Maybe return a type, instead of a bool.
    safety_zone_mode: str = "fixed"
 
    @property
    def is_adaptive(self) -> bool:
       """Whether this drone uses velocity-dependent adaptive safety zones."""
+      # TODO: adaptive is not enough, we have velocity dependent safety zones and uncertainty safety zones ... switch that behavior,
+      #  so all adaptive safety_zone are "adaptive" and then be able to check if drone is velocity dependent or uncertainty dependent. Maybe return a type, instead of a bool.
       return self.alpha is not None
 
    @property

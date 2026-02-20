@@ -89,8 +89,7 @@ class Simulator:
          # Pass comm_radius for distributed coordinators
          if cfg.comm_radius is not None:
             coord_params["comm_radius"] = cfg.comm_radius
-         coordinator = create_coordinator(
-               {"type": cfg.coordinator.type, "params": coord_params})
+         coordinator = create_coordinator({"type": cfg.coordinator.type, "params": coord_params})
 
       for drone_cfg in cfg.drones:
          spec = drone_cfg.controller or cfg.controller
@@ -102,17 +101,15 @@ class Simulator:
          # Resolve per-drone physics: lookup by drone's physics ID, fall back to first/global
          drone_physics = physics_by_id.get(drone_cfg.physics, physics)
 
-         route = Route(waypoints=[np.asarray(w, dtype=float) for w in drone_cfg.waypoints],
-                       target=np.asarray(drone_cfg.target, dtype=float))
+         route = Route(waypoints=[np.asarray(w, dtype=float) for w in drone_cfg.waypoints], target=np.asarray(drone_cfg.target, dtype=float))
          drone_color = _normalize_color(drone_cfg.drone_color)
          safety_color = _normalize_color(drone_cfg.safety_color or drone_cfg.drone_color)
          trace_color = _normalize_color(drone_cfg.trace_color or drone_cfg.drone_color)
 
-         drones.append(Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone,
-                             cons_stop=drone_cfg.cons_stop, color=drone_color, safety_color=safety_color,
-                             trace_color=trace_color, controller=controller, physics=drone_physics,
-                             x=x0, route=route, alpha=drone_cfg.alpha,
-                             safety_zone_mode=drone_cfg.safety_zone_mode))
+         drones.append(
+            Drone(drone_id=drone_cfg.drone_id, radius=drone_cfg.radius, safety_zone=drone_cfg.safety_zone, cons_stop=drone_cfg.cons_stop, color=drone_color,
+                  safety_color=safety_color, trace_color=trace_color, controller=controller, physics=drone_physics, x=x0, route=route, alpha=drone_cfg.alpha,
+                  safety_zone_mode=drone_cfg.safety_zone_mode))
 
       obstacles = [(np.asarray(o.center, dtype=float), np.asarray(o.half_extents, dtype=float)) for o in cfg.obstacles]
 
@@ -146,22 +143,14 @@ class Simulator:
       # Instantiate LSTM history buffer and provider when model path is configured.
       if cfg.lstm_model_path is not None:
          from pathlib import Path
-         from drone_sim.prediction import (
-            TrajectoryHistoryBuffer,
-            LSTMModelLoader,
-            LSTMSafetyZoneProvider,
-            UncertaintyPropagator,
-         )
+         from drone_sim.prediction import (TrajectoryHistoryBuffer, LSTMModelLoader, LSTMSafetyZoneProvider, UncertaintyPropagator, )
          _lstm_history = TrajectoryHistoryBuffer(m=20)
          _loader = LSTMModelLoader(Path(cfg.lstm_model_path))
          _propagator = UncertaintyPropagator()
          _horizon = cfg.coordinator.params.get("horizon", 5) if cfg.coordinator else 5
          sim._lstm_history = _lstm_history
-         sim._lstm_provider = LSTMSafetyZoneProvider(
-            _loader, _propagator, _lstm_history,
-            horizon=_horizon,
-            look_ahead=cfg.lstm_look_ahead,
-         )
+         sim._lstm_provider = LSTMSafetyZoneProvider(_loader, _propagator, _lstm_history, horizon=_horizon, # lstm_look_ahead is deprecated!
+               look_ahead=cfg.lstm_look_ahead, )
 
       # Initialize traces with the start positions.
       sim.traces = {d.drone_id: [d.position().copy()] for d in sim.drones}
@@ -224,13 +213,11 @@ class Simulator:
          # All Paper/"basic_paper" configs provide `coordinator: {"type": "mpc_central", ...}`.
          # If a scenario omits the coordinator, we fail fast instead of silently running a different control scheme.
          if self.coordinator is None:
-            raise RuntimeError(
-               "Simulator-step requires a coordinator (centralized MPC). Provide `coordinator` in ScenarioConfig.")
+            raise RuntimeError("Simulator-step requires a coordinator (centralized MPC). Provide `coordinator` in ScenarioConfig.")
 
          # First compute per-drone local controls (used for non-optimized drones, and as a fallback).
          for i, d in enumerate(self.drones):
-            neighbors = [(positions[j], velocities[j], self.drones[j].radius, self.drones[j].safety_zone, prefs[j],) for
-                         j in range(len(self.drones)) if j != i]
+            neighbors = [(positions[j], velocities[j], self.drones[j].radius, self.drones[j].safety_zone, prefs[j],) for j in range(len(self.drones)) if j != i]
 
             if hasattr(d.controller, "control"):
                u = d.controller.control(d, neighbors, self.obstacles)
@@ -240,15 +227,12 @@ class Simulator:
 
          # Then override optimized drones with coordinator outputs.
          try:
-            u_by_id = self.coordinator.solve_controls(
-                                                      drones=self.drones,
-                                                      obstacles=self.obstacles,
-                                                      room_min=self.room_min, room_max=self.room_max,
-                                                      lstm_provider=self._lstm_provider,
-                                                      )
+            u_by_id = self.coordinator.solve_controls(drones=self.drones, obstacles=self.obstacles, room_min=self.room_min, room_max=self.room_max,
+                  lstm_provider=self._lstm_provider, )
 
          except RuntimeError as exc:
-            # Mark the step as infeasible (e.g. walls/obstacles make the optimization problem infeasible) and abort this step without advancing the simulation time.
+            # Mark the step as infeasible (e.g. walls/obstacles make the optimization problem infeasible) and abort this step without advancing the
+            # simulation time.
             self.infeasible = True
             self.infeasible_reason = str(exc)
             return
@@ -316,12 +300,8 @@ class Simulator:
 
       # Add ADMM stats if using distributed coordinator
       if hasattr(self.coordinator, "get_last_iteration_count"):
-         result["admm_stats"] = {
-            "iteration_count": self.coordinator.get_last_iteration_count(),
-            "primal_residual": self.coordinator.get_last_residuals()[0],
-            "dual_residual": self.coordinator.get_last_residuals()[1],
-            "converged": self.coordinator.get_last_converged(),
-            "neighbor_pairs": [list(pair) for pair in self.coordinator.get_neighbor_pairs()],
-         }
+         result["admm_stats"] = {"iteration_count": self.coordinator.get_last_iteration_count(), "primal_residual": self.coordinator.get_last_residuals()[0],
+               "dual_residual": self.coordinator.get_last_residuals()[1], "converged": self.coordinator.get_last_converged(),
+               "neighbor_pairs": [list(pair) for pair in self.coordinator.get_neighbor_pairs()], }
 
       return result

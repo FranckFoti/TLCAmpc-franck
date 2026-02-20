@@ -14,7 +14,6 @@
   ],
   "comm_radius": null,
   "lstm_model_path": "lstm_model.pt",
-  "lstm_look_ahead": 20,
   "controller": {
     "type": "mpc_agent_adaptive",
     "params": {

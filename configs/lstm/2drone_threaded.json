@@ -1,6 +1,6 @@
 {
-  "dt": 0.1,
-  "room": {"min": [-2.5, -2.5, -2.5], "max": [2.5, 2.5, 2.5]},
+  "dt": 0.08,
+  "room": {"min": [-4.0, -4.0, -4.0], "max": [4.0, 4.0, 4.0]},
   "physics": [
     {
       "id": "default",
@@ -14,7 +14,6 @@
   ],
   "comm_radius": null,
   "lstm_model_path": "lstm_model.pt",
-  "lstm_look_ahead": 20,
   "controller": {
     "type": "mpc_agent_adaptive",
     "params": {
@@ -33,8 +32,8 @@
   "drones": [
     {
       "drone_id": "drone-1",
-      "start": [-1.8, -1.8, -1.8],
-      "target": [1.8, 1.8, 1.8],
+      "start": [-3.1, -3.1, -3.1],
+      "target": [3.1, 3.1, 3.1],
       "radius": 0.2,
       "safety_zone": 0.6,
       "cons_stop": 0.0,
@@ -44,8 +43,8 @@
     },
     {
       "drone_id": "drone-2",
-      "start": [1.8, 1.8, 1.8],
-      "target": [-1.8, -1.8, -1.8],
+      "start": [3.1, 3.1, 3.1],
+      "target": [-3.1, -3.1, -3.1],
       "radius": 0.2,
       "safety_zone": 0.6,
       "cons_stop": 0.0,

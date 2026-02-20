@@ -22,6 +22,7 @@ from drone_sim.simulation.distributed.distributed_coordinator import Distributed
 from tools.utility import DronePlacementError
 from tools.utility.scenario_creator import create_scenario
 from drone_sim.domain.utils.helper import all_drones_reached_destination
+import logging
 
 
 def load_parametrized_json(path: str | Path, params: dict[str, str] | None = None) -> dict[str, Any]:
@@ -110,11 +111,16 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
       safety_alphas: list[float] = []
       for d in sim.drones:
           vel = d.velocity()
-          safety_zones.append(float(d.compute_adaptive_radius(vel)))
-          if d.is_adaptive:
+          if sim._lstm_provider is not None and d.safety_zone_mode == "lstm":
+              radii = sim._lstm_provider.compute_neighbor_safety_radii([d.drone_id], {d.drone_id: d.safety_zone})
+              safety_zones.append(float(np.mean(radii[d.drone_id])))
+              safety_alphas.append(0.5)
+          elif d.is_adaptive:
+              safety_zones.append(float(d.compute_adaptive_radius(vel)))
               speed_ratio = min(float(np.linalg.norm(vel)) / d.v_max, 1.0) if d.v_max > 0 else 0.0
               safety_alphas.append(0.3 + 0.7 * speed_ratio)
           else:
+              safety_zones.append(float(d.compute_adaptive_radius(vel)))
               safety_alphas.append(0.8)
 
       is_distributed = isinstance(sim.coordinator, DistributedMPCCoordinator) # TODO check of another field!!
@@ -220,6 +226,7 @@ def _die(msg: str, code: int = 1) -> "NoReturn":
 
 
 if __name__ == "__main__":
+   logging.basicConfig(level=logging.DEBUG)
    try:
       main()
    except KeyboardInterrupt:

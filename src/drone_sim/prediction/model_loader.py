@@ -27,11 +27,8 @@ class LSTMModelLoader:
    :param model_kwargs: Optional kwargs for AVLSTMModel constructor.
    """
 
-   def __init__(
-      self,
-      checkpoint_path: Path,
-      model_kwargs: dict | None = None,
-   ) -> None:
+   def __init__(self, checkpoint_path: Path, model_kwargs: dict | None = None, ) -> None:
+      checkpoint_path = Path(__file__).parent.parent / "resources" / checkpoint_path
       model_kwargs = model_kwargs or {}
       self._model = AVLSTMModel(**model_kwargs)
       state_dict = torch.load(checkpoint_path, map_location="cpu")
