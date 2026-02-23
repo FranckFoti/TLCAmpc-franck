@@ -175,8 +175,8 @@ def sample_coordinator_spec() -> ControllerSpec:
 
 @pytest.fixture
 def sample_obstacle_config() -> ObstacleConfig:
-   """Return a valid ObstacleConfig."""
-   return ObstacleConfig(center=[2.5, 2.5, 2.5], radius=0.5)
+   """Return a valid ObstacleConfig with box geometry."""
+   return ObstacleConfig(center=[2.5, 2.5, 2.5], half_extents=[0.5, 0.5, 0.5])
 
 
 @pytest.fixture
@@ -247,11 +247,11 @@ def sample_simulator_single_drone(sample_scenario_config_single_drone: ScenarioC
 
 
 @pytest.fixture
-def sample_obstacles() -> list[tuple[np.ndarray, float]]:
-   """Return a list of obstacles as (center, radius) tuples."""
+def sample_obstacles() -> list[tuple[np.ndarray, np.ndarray]]:
+   """Return a list of obstacles as (center, half_extents) tuples."""
    return [
-      (np.array([5.0, 5.0, 5.0]), 0.5),
-      (np.array([7.0, 3.0, 2.0]), 0.3)
+      (np.array([5.0, 5.0, 5.0]), np.array([0.5, 0.5, 0.5])),
+      (np.array([7.0, 3.0, 2.0]), np.array([0.3, 0.3, 0.3]))
    ]
 
 

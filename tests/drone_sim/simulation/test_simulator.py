@@ -73,8 +73,8 @@ class TestSimulatorFromConfig:
          coordinator=ControllerSpec(type="mpc_central"),
          drones=[DroneConfig(drone_id="d1", start=[0, 0, 0], target=[5, 5, 5])],
          obstacles=[
-            ObstacleConfig(center=[2.5, 2.5, 2.5], radius=0.5),
-            ObstacleConfig(center=[1.0, 1.0, 1.0], radius=0.3)
+            ObstacleConfig(center=[2.5, 2.5, 2.5], half_extents=[0.5, 0.5, 0.5]),
+            ObstacleConfig(center=[1.0, 1.0, 1.0], half_extents=[0.3, 0.3, 0.3])
          ],
          room=RoomConfig(min=[-10, -10, 0], max=[10, 10, 10])
       )
@@ -83,7 +83,7 @@ class TestSimulatorFromConfig:
 
       assert len(sim.obstacles) == 2
       assert_array_almost_equal(sim.obstacles[0][0], [2.5, 2.5, 2.5])
-      assert sim.obstacles[0][1] == 0.5
+      assert_array_almost_equal(sim.obstacles[0][1], [0.5, 0.5, 0.5])
 
    def test_from_config_derives_room_when_not_specified(self):
       """Test from_config derives room bounds when not specified."""
@@ -265,7 +265,7 @@ class TestSimulatorComputeCollisions:
          controller=ControllerSpec(type="mpc_agent"),
          coordinator=ControllerSpec(type="mpc_central"),
          drones=[DroneConfig(drone_id="d1", start=[0, 0, 5], target=[5, 5, 5])],
-         obstacles=[ObstacleConfig(center=[0.5, 0, 5], radius=0.3)],
+         obstacles=[ObstacleConfig(center=[0.5, 0, 5], half_extents=[0.3, 0.3, 0.3])],
          room=RoomConfig(min=[-10, -10, 0], max=[10, 10, 10])
       )
 
@@ -331,7 +331,7 @@ class TestSimulatorToDict:
          controller=ControllerSpec(type="mpc_agent"),
          coordinator=ControllerSpec(type="mpc_central"),
          drones=[DroneConfig(drone_id="d1", start=[0, 0, 5], target=[5, 5, 5])],
-         obstacles=[ObstacleConfig(center=[2.5, 2.5, 2.5], radius=0.5)],
+         obstacles=[ObstacleConfig(center=[2.5, 2.5, 2.5], half_extents=[0.5, 0.5, 0.5])],
          room=RoomConfig(min=[-10, -10, 0], max=[10, 10, 10])
       )
 
@@ -340,7 +340,7 @@ class TestSimulatorToDict:
 
       assert len(result["obstacles"]) == 1
       assert "center" in result["obstacles"][0]
-      assert "radius" in result["obstacles"][0]
+      assert "half_extents" in result["obstacles"][0]
       assert len(result["obstacles"][0]["center"]) == 3
 
    def test_to_dict_collisions_format(self, sample_simulator: Simulator):

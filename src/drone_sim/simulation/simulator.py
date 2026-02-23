@@ -32,7 +32,7 @@ class Simulator:
    dt: float
    physics: object
    drones: list[Drone]
-   obstacles: list[tuple[np.ndarray, float]]
+   obstacles: list[tuple[np.ndarray, np.ndarray]]
    room_min: np.ndarray
    room_max: np.ndarray
 
@@ -108,7 +108,7 @@ class Simulator:
                              trace_color=trace_color, controller=controller, physics=drone_physics,
                              x=x0, route=route, alpha=drone_cfg.alpha))
 
-      obstacles = [(np.asarray(o.center, dtype=float), float(o.radius)) for o in cfg.obstacles]
+      obstacles = [(np.asarray(o.center, dtype=float), np.asarray(o.half_extents, dtype=float)) for o in cfg.obstacles]
 
       if cfg.room is not None:
          room_min = np.asarray(cfg.room.min, dtype=float)
@@ -120,7 +120,7 @@ class Simulator:
             pts.append(np.asarray(drone_cfg.start, dtype=float))
             pts.extend([np.asarray(w, dtype=float) for w in drone_cfg.waypoints])
             pts.append(np.asarray(drone_cfg.target, dtype=float))
-         for c, _r in obstacles:
+         for c, _he in obstacles:
             pts.append(c)
 
          if pts:
@@ -169,9 +169,12 @@ class Simulator:
       # Drone-obstacle
       for owner in self.drones:
          p_owner = owner.position()
-         for k, (c, r) in enumerate(self.obstacles):
+         for k, (c, he) in enumerate(self.obstacles):
+            # Phase 22 will replace with box collision detection.
+            # Placeholder: approximate collision radius as mean half-extent.
+            approx_r = float(np.mean(he))
             dist = float(np.linalg.norm(c - p_owner))
-            threshold = float(owner.safety_zone + r)
+            threshold = float(owner.safety_zone + approx_r)
             if dist <= threshold:
                events.append({"kind": "drone_obstacle", "owner": owner.drone_id, "obstacle_idx": k, "distance": dist, "threshold": threshold})
 
@@ -279,7 +282,7 @@ class Simulator:
             }
             for d in self.drones
          ],
-         "obstacles": [{"center": c.tolist(), "radius": r} for c, r in self.obstacles],
+         "obstacles": [{"center": c.tolist(), "half_extents": he.tolist()} for c, he in self.obstacles],
          "collisions": list(self.last_collisions),
       }
 

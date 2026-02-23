@@ -153,24 +153,24 @@ class TestObstacleConfig:
 
    def test_obstacle_config_valid(self):
       """Test ObstacleConfig creation with valid inputs."""
-      obs = ObstacleConfig(center=[2.0, 3.0, 4.0], radius=0.5)
+      obs = ObstacleConfig(center=[2.0, 3.0, 4.0], half_extents=[0.5, 0.5, 0.5])
       assert obs.center == [2.0, 3.0, 4.0]
-      assert obs.radius == 0.5
+      assert obs.half_extents == [0.5, 0.5, 0.5]
 
    def test_obstacle_config_center_wrong_length_raises(self):
       """Test ObstacleConfig raises ValidationError for center with wrong length."""
       with pytest.raises(ValidationError, match="center"):
-         ObstacleConfig(center=[1.0, 2.0], radius=0.5)
+         ObstacleConfig(center=[1.0, 2.0], half_extents=[0.5, 0.5, 0.5])
 
-   def test_obstacle_config_missing_radius_raises(self):
-      """Test ObstacleConfig raises ValidationError when radius is missing."""
-      with pytest.raises(ValidationError, match="radius"):
-         ObstacleConfig(center=[1.0, 2.0, 3.0])  # type: ignore[call-arg]
+   def test_obstacle_config_missing_half_extents_raises(self):
+      """Test ObstacleConfig raises ValidationError when half_extents is missing."""
+      with pytest.raises(ValidationError):
+         ObstacleConfig(center=[1.0, 2.0, 3.0])  # missing half_extents
 
-   def test_obstacle_config_edge_case_zero_radius(self):
-      """Test ObstacleConfig allows zero radius (point obstacle)."""
-      obs = ObstacleConfig(center=[0.0, 0.0, 0.0], radius=0.0)
-      assert obs.radius == 0.0
+   def test_obstacle_config_edge_case_zero_half_extents(self):
+      """Test ObstacleConfig allows zero half_extents (point obstacle)."""
+      obs = ObstacleConfig(center=[0.0, 0.0, 0.0], half_extents=[0.0, 0.0, 0.0])
+      assert obs.half_extents == [0.0, 0.0, 0.0]
 
 
 class TestRoomConfig:
@@ -219,7 +219,7 @@ class TestScenarioConfig:
             DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0]),
             DroneConfig(drone_id="d2", start=[5.0, 5.0, 5.0], target=[0.0, 0.0, 0.0])
          ],
-         obstacles=[ObstacleConfig(center=[2.5, 2.5, 2.5], radius=0.3)],
+         obstacles=[ObstacleConfig(center=[2.5, 2.5, 2.5], half_extents=[0.3, 0.3, 0.3])],
          room=RoomConfig(min=[-10.0, -10.0, 0.0], max=[10.0, 10.0, 10.0])
       )
       assert cfg.dt == 0.05

@@ -62,7 +62,7 @@ class DroneConfig(BaseModel):
 
 class ObstacleConfig(BaseModel):
    center: list[float] = Field(..., min_length=3, max_length=3)
-   radius: float
+   half_extents: list[float] = Field(..., min_length=3, max_length=3)
 
 
 class RoomConfig(BaseModel):
