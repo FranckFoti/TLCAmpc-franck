@@ -250,21 +250,30 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
    ) -> np.ndarray:
       """Evaluate static obstacle constraints.
 
+      Produces one horizon-length row per obstacle and concatenates them so
+      that SLSQP treats each element as a separate inequality constraint.
+      With N obstacles and horizon H the returned shape is (N*H,), or (H,)
+      when there are no obstacles.
+
       :param drone: the drone.
       :param pred_pos: predicted positions (horizon, 3).
       :param obstacles: list of (center, half_extents) tuples.
       :param pred_vel: optional predicted velocities (horizon, 3).
       :return: constraint margin array.
       """
-      result = np.zeros(self._horizon)
+      parts = []
       for center, half_extents in obstacles:
          obstacle_center = np.asarray(center, dtype=float).reshape(3)
          obstacle_half_extents = np.asarray(half_extents, dtype=float).reshape(3)
+         row = np.zeros(self._horizon)
          for step in range(self._horizon):
             safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
             dist = point_to_box_dist(pred_pos[step], obstacle_center, obstacle_half_extents)
-            result[step] = dist - safety
-      return result
+            row[step] = dist - safety
+         parts.append(row)
+      if not parts:
+         return np.zeros(self._horizon)
+      return np.concatenate(parts)
 
 
 class RoomConstraints(MPCConstraints):

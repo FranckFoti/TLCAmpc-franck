@@ -34,10 +34,32 @@ def _draw_sphere_wireframe(ax: object, center: np.ndarray, radius: float, *, col
    ax.plot_wireframe(x, y, z, color=color, linewidth=lw, alpha=alpha, rstride=2, cstride=2)
 
 
+def _draw_box_wireframe(ax: object, center: np.ndarray, half_extents: np.ndarray, *, color: str, alpha: float, lw: float) -> None:
+   """Draw an axis-aligned box wireframe (12 edges) given center and half-extents."""
+   cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
+   hx, hy, hz = float(half_extents[0]), float(half_extents[1]), float(half_extents[2])
+   x0, x1 = cx - hx, cx + hx
+   y0, y1 = cy - hy, cy + hy
+   z0, z1 = cz - hz, cz + hz
+   edges = [
+      # bottom face
+      ((x0, y0, z0), (x1, y0, z0)), ((x1, y0, z0), (x1, y1, z0)),
+      ((x1, y1, z0), (x0, y1, z0)), ((x0, y1, z0), (x0, y0, z0)),
+      # top face
+      ((x0, y0, z1), (x1, y0, z1)), ((x1, y0, z1), (x1, y1, z1)),
+      ((x1, y1, z1), (x0, y1, z1)), ((x0, y1, z1), (x0, y0, z1)),
+      # vertical edges
+      ((x0, y0, z0), (x0, y0, z1)), ((x1, y0, z0), (x1, y0, z1)),
+      ((x1, y1, z0), (x1, y1, z1)), ((x0, y1, z0), (x0, y1, z1)),
+   ]
+   for (xa, ya, za), (xb, yb, zb) in edges:
+      ax.plot([xa, xb], [ya, yb], [za, zb], color=color, linewidth=lw, alpha=alpha)
+
+
 def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: list[np.ndarray],
                drone_radii: list[float], drone_safety_zones: list[float], drone_colors: list[object],
                safety_colors: list[object], trace_colors: list[object], drone_traces: list[list[np.ndarray]],
-               obstacles: list[tuple[np.ndarray, float]], step_count: int, compute_time_s: float,
+               obstacles: list[tuple[np.ndarray, np.ndarray]], step_count: int, compute_time_s: float,
                neighbor_links: list[tuple[int, int]] | None = None,
                admm_iteration_count: int | None = None,
                admm_converged: bool | None = None,
@@ -100,11 +122,19 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
                ax.quiver(p1[0] - arrow_len * d[0], p1[1] - arrow_len * d[1], p1[2] - arrow_len * d[2], arrow_len * d[0],
                          arrow_len * d[1], arrow_len * d[2], color=c_trace, linewidth=1.0, arrow_length_ratio=0.35)
 
-   # Obstacles (render centers; radius shown via point size)
+   # Obstacles — draw as 3D wireframe cuboids
    if obstacles:
-      C = np.stack([c for c, _r in obstacles], axis=0)
-      sizes = [max(20.0, float(r) * 300.0) for _c, r in obstacles]
-      ax.scatter(C[:, 0], C[:, 1], C[:, 2], s=sizes, c="tab:red", alpha=0.6, depthshade=True, label="obstacles")
+      for i, (c, he) in enumerate(obstacles):
+         center_arr = np.asarray(c, dtype=float).reshape(3)
+         he_arr = np.asarray(he, dtype=float).reshape(3)
+         label = "obstacles" if i == 0 else None
+         _draw_box_wireframe(ax, center_arr, he_arr, color="tab:red", alpha=0.7, lw=1.2)
+         if label:
+            # Invisible scatter point to register the legend entry
+            ax.scatter(
+               [float(center_arr[0])], [float(center_arr[1])], [float(center_arr[2])],
+               s=1, c="tab:red", alpha=0.0, label=label
+            )
 
    ax.set_xlabel("x")
    ax.set_ylabel("y")

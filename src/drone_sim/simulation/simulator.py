@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from drone_sim.domain.config import ColorValue, ScenarioConfig
+from drone_sim.domain.constraints import point_to_box_dist
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.domain.registry import create_controller, create_coordinator, create_physics
 
@@ -143,13 +144,12 @@ class Simulator:
       return sim
 
    def _compute_collisions(self) -> list[dict]:
-      """Compute safety-zone collision events using fixed radii only.
+      """Compute safety-zone collision events.
 
-         A collision is reported when another drone enters the owner's safety sphere (radius = owner.safety_zone + intruder.radius)
-         or when an obstacle center enters radius = owner.safety_zone + obstacle.radius.
-
-         Note: collision DETECTION stays with fixed safety_zone for now.
-         Adaptive radius only affects MPC constraints (Phase 10).
+      Drone-drone: collision when Euclidean distance < sum of safety zones.
+      Drone-obstacle: collision when point_to_box_dist(drone_pos, box) < drone.safety_zone.
+        point_to_box_dist returns 0 inside the box and positive distance outside,
+        so drones inside a box are always flagged.
       """
       events: list[dict] = []
 
@@ -166,15 +166,12 @@ class Simulator:
             if dist + 1e-6 <= threshold:
                events.append({"kind": "drone_drone", "owner": owner.drone_id, "intruder": intr.drone_id, "distance": dist, "threshold": threshold})
 
-      # Drone-obstacle
+      # Drone-obstacle (box geometry)
       for owner in self.drones:
          p_owner = owner.position()
          for k, (c, he) in enumerate(self.obstacles):
-            # Phase 22 will replace with box collision detection.
-            # Placeholder: approximate collision radius as mean half-extent.
-            approx_r = float(np.mean(he))
-            dist = float(np.linalg.norm(c - p_owner))
-            threshold = float(owner.safety_zone + approx_r)
+            dist = point_to_box_dist(p_owner, c, he)
+            threshold = float(owner.safety_zone)
             if dist <= threshold:
                events.append({"kind": "drone_obstacle", "owner": owner.drone_id, "obstacle_idx": k, "distance": dist, "threshold": threshold})
 

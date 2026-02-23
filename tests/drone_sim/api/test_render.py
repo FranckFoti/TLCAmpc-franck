@@ -12,7 +12,7 @@ import pytest
 import numpy as np
 from unittest.mock import MagicMock
 
-from drone_sim.api.render import render_png, _draw_room_wireframe, _draw_sphere_wireframe
+from drone_sim.api.render import render_png, _draw_room_wireframe, _draw_sphere_wireframe, _draw_box_wireframe
 
 
 class TestDrawRoomWireframe:
@@ -119,6 +119,30 @@ class TestDrawSphereWireframe:
       assert ax.plot_wireframe.called
 
 
+class TestDrawBoxWireframe:
+   """Tests for _draw_box_wireframe helper function."""
+
+   def test_draw_box_wireframe_draws_12_edges(self):
+      """Test _draw_box_wireframe calls ax.plot exactly 12 times (one per edge)."""
+      ax = MagicMock()
+      center = np.array([0.0, 0.0, 0.0])
+      half_extents = np.array([1.0, 1.0, 1.0])
+
+      _draw_box_wireframe(ax, center, half_extents, color="tab:red", alpha=0.7, lw=1.2)
+
+      assert ax.plot.call_count == 12
+
+   def test_draw_box_wireframe_anisotropic(self):
+      """Test _draw_box_wireframe with different per-axis extents."""
+      ax = MagicMock()
+      center = np.array([1.0, 2.0, 3.0])
+      half_extents = np.array([2.0, 0.5, 0.1])
+
+      _draw_box_wireframe(ax, center, half_extents, color="red", alpha=0.5, lw=1.0)
+
+      assert ax.plot.call_count == 12
+
+
 class TestRenderPng:
    """Tests for render_png function."""
 
@@ -202,13 +226,24 @@ class TestRenderPng:
    def test_render_png_with_obstacles(self, minimal_render_kwargs):
       """Test render_png with obstacles."""
       minimal_render_kwargs["obstacles"] = [
-         (np.array([2.5, 2.5, 2.5]), 0.5),
-         (np.array([7.0, 3.0, 4.0]), 0.3)
+         (np.array([2.5, 2.5, 2.5]), np.array([0.5, 0.5, 0.5])),
+         (np.array([7.0, 3.0, 4.0]), np.array([0.3, 0.3, 0.3]))
       ]
 
       result = render_png(**minimal_render_kwargs)
 
       assert isinstance(result, bytes)
+
+   def test_render_png_with_anisotropic_obstacle(self, minimal_render_kwargs):
+      """Test render_png with non-cubic box obstacle (different half-extents per axis)."""
+      minimal_render_kwargs["obstacles"] = [
+         (np.array([5.0, 5.0, 5.0]), np.array([2.0, 0.5, 0.3]))
+      ]
+
+      result = render_png(**minimal_render_kwargs)
+
+      assert isinstance(result, bytes)
+      assert result[:8] == b"\x89PNG\r\n\x1a\n"
 
    def test_render_png_custom_view_angle(self, minimal_render_kwargs):
       """Test render_png with custom elev/azim."""
@@ -358,7 +393,7 @@ class TestRenderPng:
 
    def test_render_png_obstacle_at_boundary(self, minimal_render_kwargs):
       """Test render_png with obstacle at room boundary."""
-      minimal_render_kwargs["obstacles"] = [(np.array([10.0, 10.0, 10.0]), 0.5)]
+      minimal_render_kwargs["obstacles"] = [(np.array([10.0, 10.0, 10.0]), np.array([0.5, 0.5, 0.5]))]
 
       result = render_png(**minimal_render_kwargs)
 

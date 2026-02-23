@@ -354,6 +354,65 @@ class TestObstacleAvoidanceSingle:
         assert result.shape == (1 + horizon,)
         assert result[0] == 7.0
 
+    def test_two_obstacles_both_constrain(self):
+        """Two obstacles each produce their own horizon row (shape N*H).
+
+        This test would fail on the buggy code (overwrite loop) where only the
+        last obstacle's margin survived and result.shape == (1,).
+
+        horizon=1, safety_zone=0.5, drone at origin.
+        obstacle_A at [3,0,0], half_extents=[0.3,0.3,0.3]:
+            dist_A ~= 2.7 (face approach, eps regularized)  => margin_A ~= 2.7 - 0.5 = 2.2
+        obstacle_B at [1,0,0], half_extents=[0.1,0.1,0.1]:
+            dist_B ~= 0.9 (face approach, eps regularized)  => margin_B ~= 0.9 - 0.5 = 0.4
+        """
+        horizon = 1
+        obstacle_avoidance = ObstacleAvoidanceConstraints(horizon=horizon)
+        drone = _make_drone(safety_zone=0.5)
+        pred_pos = np.array([[0.0, 0.0, 0.0]])
+        obstacles = [
+            (np.array([3.0, 0.0, 0.0]), np.array([0.3, 0.3, 0.3])),  # obstacle_A
+            (np.array([1.0, 0.0, 0.0]), np.array([0.1, 0.1, 0.1])),  # obstacle_B
+        ]
+        values = np.array([])
+
+        result = obstacle_avoidance.evaluate_single(drone, pred_pos, obstacles, values)
+
+        # Fixed code: shape == (2,) — one row per obstacle
+        assert result.shape == (2,), f"Expected shape (2,) but got {result.shape}"
+        assert result[0] == pytest.approx(2.2, abs=1e-3)   # obstacle_A margin
+        assert result[1] == pytest.approx(0.4, abs=1e-3)   # obstacle_B margin
+        assert result[0] > 0   # drone safe from obstacle_A
+        assert result[1] > 0   # drone safe from obstacle_B
+
+    def test_two_obstacles_one_violated(self):
+        """Two obstacles with large safety_zone: obstacle_B margin goes negative.
+
+        Demonstrates that each obstacle is evaluated independently — obstacle_A
+        (far enough) stays positive while obstacle_B (too close) is negative.
+        On the buggy code with obstacles reversed in the list, only obstacle_A's
+        (safe) margin would survive and the violation would be silently dropped.
+
+        horizon=1, safety_zone=2.5.
+        obstacle_A at [3,0,0], half_extents=[0.3,0.3,0.3]: dist_A ~= 2.7, margin ~= 0.2
+        obstacle_B at [1,0,0], half_extents=[0.1,0.1,0.1]: dist_B ~= 0.9, margin ~= -1.6
+        """
+        horizon = 1
+        obstacle_avoidance = ObstacleAvoidanceConstraints(horizon=horizon)
+        drone = _make_drone(safety_zone=2.5)
+        pred_pos = np.array([[0.0, 0.0, 0.0]])
+        obstacles = [
+            (np.array([3.0, 0.0, 0.0]), np.array([0.3, 0.3, 0.3])),  # obstacle_A (safe)
+            (np.array([1.0, 0.0, 0.0]), np.array([0.1, 0.1, 0.1])),  # obstacle_B (violated)
+        ]
+        values = np.array([])
+
+        result = obstacle_avoidance.evaluate_single(drone, pred_pos, obstacles, values)
+
+        assert result.shape == (2,), f"Expected shape (2,) but got {result.shape}"
+        assert result[0] > 0, "obstacle_A margin should be positive (drone is safe)"
+        assert result[1] < 0, "obstacle_B margin should be negative (constraint violated)"
+
 
 class TestObstacleAvoidanceMulti:
     """Tests for ObstacleAvoidanceConstraints.evaluate_multi."""
