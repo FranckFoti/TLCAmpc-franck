@@ -64,6 +64,7 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
                admm_iteration_count: int | None = None,
                admm_converged: bool | None = None,
                safety_alphas: list[float] | None = None,
+               max_safety_zones: list[float] | None = None,
                width: int = 900,
                height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0) -> bytes:
    """Render a 3D scene to PNG bytes.
@@ -106,6 +107,15 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drone_positions: l
          # Safety zones as wireframe spheres.
          alpha_val = safety_alphas[i] if safety_alphas else 0.8
          _draw_sphere_wireframe(ax, pos, float(rz), color=c_safety, alpha=alpha_val, lw=0.6)
+
+         # Ghost sphere: maximum adaptive radius (only when larger than current zone)
+         if max_safety_zones is not None:
+            max_r = max_safety_zones[i]
+            if max_r > float(rz) + 1e-4:  # only draw if meaningfully larger
+               _draw_sphere_wireframe(
+                  ax, pos, max_r,
+                  color=c_safety, alpha=0.12, lw=0.4
+               )
 
          # Trace as a dotted/pointed line + a small arrow.
          if trace and len(trace) >= 2:

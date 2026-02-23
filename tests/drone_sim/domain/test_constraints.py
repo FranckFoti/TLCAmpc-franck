@@ -18,6 +18,7 @@ from drone_sim.domain.constraints import (
     MovingObstacleAvoidanceConstraints,
     ObstacleAvoidanceConstraints,
     RoomConstraints,
+    point_to_box_dist,
 )
 from drone_sim.domain.drone import Drone, Route
 from drone_sim.physics.linear_kinematics import LinearKinematicsPhysics
@@ -272,6 +273,123 @@ class TestMovingObstacleAvoidanceMulti:
         result = moving_avoidance.evaluate_multi(drones, pred_pos, values)
 
         assert np.all(result < 0)
+
+# ---------------------------------------------------------------
+# point_to_box_dist
+# ---------------------------------------------------------------
+
+class TestPointToBoxDist:
+    """Direct unit tests for point_to_box_dist covering all geometric approach directions.
+
+    The function uses regularized L2 norm: sqrt(sum(relu(d)^2) + eps^2) - eps
+    with eps=1e-3. This means:
+    - Outside the box: approx equal to Euclidean distance to nearest surface (within eps error)
+    - Inside the box: exactly 0.0 (all relu_d = 0, sqrt(eps^2) - eps = 0)
+    - On surface: exactly 0.0
+    """
+
+    def test_face_approach_x_axis(self):
+        """Point offset along x-axis only (face approach).
+
+        point=[3,0,0], center=[0,0,0], half_extents=[1,1,1].
+        d_x=3-1=2.0, d_y=d_z clamped to 0. Expected: approx 2.0.
+        """
+        dist = point_to_box_dist(
+            np.array([3.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([1.0, 1.0, 1.0]),
+        )
+        assert dist == pytest.approx(2.0, abs=1e-2)
+
+    def test_face_approach_negative_z(self):
+        """Point offset along negative z-axis (face approach).
+
+        point=[0,0,-4], center=[0,0,0], half_extents=[1,1,1].
+        d_z=4-1=3.0. Expected: approx 3.0.
+        """
+        dist = point_to_box_dist(
+            np.array([0.0, 0.0, -4.0]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([1.0, 1.0, 1.0]),
+        )
+        assert dist == pytest.approx(3.0, abs=1e-2)
+
+    def test_edge_approach_xy(self):
+        """Point offset along two axes simultaneously (edge approach).
+
+        point=[2,2,0], center=[0,0,0], half_extents=[1,1,1].
+        d_x=d_y=1.0, d_z clamped to 0. Expected: sqrt(2) approx 1.4142.
+        """
+        dist = point_to_box_dist(
+            np.array([2.0, 2.0, 0.0]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([1.0, 1.0, 1.0]),
+        )
+        assert dist == pytest.approx(np.sqrt(2.0), abs=1e-2)
+
+    def test_corner_approach(self):
+        """Point offset along all three axes simultaneously (corner approach).
+
+        point=[2,2,2], center=[0,0,0], half_extents=[1,1,1].
+        d_x=d_y=d_z=1.0. Expected: sqrt(3) approx 1.7321.
+        """
+        dist = point_to_box_dist(
+            np.array([2.0, 2.0, 2.0]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([1.0, 1.0, 1.0]),
+        )
+        assert dist == pytest.approx(np.sqrt(3.0), abs=1e-2)
+
+    def test_inside_box_returns_zero(self):
+        """Point at box center returns 0.0.
+
+        All d_i = -1.0, clamped to 0. relu_d=[0,0,0]. Expected: 0.0.
+        """
+        dist = point_to_box_dist(
+            np.array([0.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([1.0, 1.0, 1.0]),
+        )
+        assert dist == pytest.approx(0.0, abs=1e-2)
+
+    def test_inside_box_off_center(self):
+        """Point inside box but off-center returns 0.0.
+
+        point=[0.5,0.3,-0.2], all |point_i| < 1.0 so all d_i < 0. Expected: 0.0.
+        """
+        dist = point_to_box_dist(
+            np.array([0.5, 0.3, -0.2]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([1.0, 1.0, 1.0]),
+        )
+        assert dist == pytest.approx(0.0, abs=1e-2)
+
+    def test_on_surface_face(self):
+        """Point on a face surface returns 0.0.
+
+        point=[1,0,0], center=[0,0,0], half_extents=[1,1,1].
+        d_x=0, d_y=d_z=0 -> relu_d=[0,0,0]. Expected: 0.0.
+        """
+        dist = point_to_box_dist(
+            np.array([1.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([1.0, 1.0, 1.0]),
+        )
+        assert dist == pytest.approx(0.0, abs=1e-2)
+
+    def test_asymmetric_half_extents(self):
+        """Point with asymmetric half_extents — verifies per-axis handling.
+
+        point=[3,0,0], center=[0,0,0], half_extents=[2,0.5,0.5].
+        d_x=3-2=1.0 (only x excess). Expected: approx 1.0.
+        """
+        dist = point_to_box_dist(
+            np.array([3.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 0.0]),
+            np.array([2.0, 0.5, 0.5]),
+        )
+        assert dist == pytest.approx(1.0, abs=1e-2)
+
 
 # ---------------------------------------------------------------
 # ObstacleAvoidanceConstraints

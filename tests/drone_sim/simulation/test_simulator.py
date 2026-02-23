@@ -276,6 +276,52 @@ class TestSimulatorComputeCollisions:
       assert len(obstacle_collisions) > 0
       assert obstacle_collisions[0]["kind"] == "drone_obstacle"
 
+   def test_compute_collisions_drone_inside_box(self):
+      """Drone positioned inside a box obstacle always triggers a drone_obstacle collision.
+
+      point_to_box_dist returns 0.0 inside the box, which is <= safety_zone,
+      so the collision event is always generated.
+      """
+      cfg = ScenarioConfig(
+         dt=0.1,
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         coordinator=ControllerSpec(type="mpc_central"),
+         drones=[DroneConfig(drone_id="d1", start=[0, 0, 0], target=[5, 5, 5])],
+         obstacles=[ObstacleConfig(center=[0.0, 0.0, 0.0], half_extents=[1.0, 1.0, 1.0])],
+         room=RoomConfig(min=[-10, -10, -10], max=[10, 10, 10])
+      )
+
+      sim = Simulator.from_config(cfg)
+      collisions = sim._compute_collisions()
+
+      obstacle_collisions = [c for c in collisions if c["kind"] == "drone_obstacle"]
+      assert len(obstacle_collisions) == 1
+      assert obstacle_collisions[0]["distance"] == pytest.approx(0.0, abs=1e-2)
+      assert obstacle_collisions[0]["threshold"] > 0
+
+   def test_compute_collisions_no_collision_drone_far_outside_box(self):
+      """Drone far from box obstacle produces no drone_obstacle collision event.
+
+      Drone at [10, 0, 0], box centered at [0,0,0] with half_extents [0.5,0.5,0.5].
+      point_to_box_dist approx 9.5, drone safety_zone=1.0 -> 9.5 > 1.0 -> no collision.
+      """
+      cfg = ScenarioConfig(
+         dt=0.1,
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         coordinator=ControllerSpec(type="mpc_central"),
+         drones=[DroneConfig(drone_id="d1", start=[10, 0, 0], target=[5, 5, 5])],
+         obstacles=[ObstacleConfig(center=[0.0, 0.0, 0.0], half_extents=[0.5, 0.5, 0.5])],
+         room=RoomConfig(min=[-10, -10, -10], max=[10, 10, 10])
+      )
+
+      sim = Simulator.from_config(cfg)
+      collisions = sim._compute_collisions()
+
+      obstacle_collisions = [c for c in collisions if c["kind"] == "drone_obstacle"]
+      assert len(obstacle_collisions) == 0
+
 
 class TestSimulatorToDict:
    """Tests for Simulator.to_dict method."""

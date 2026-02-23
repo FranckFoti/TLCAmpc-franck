@@ -80,6 +80,10 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
        else:
            safety_alphas.append(0.8)
 
+   max_safety_zones: list[float] = [
+       float(d.compute_max_adaptive_radius()) for d in _sim.drones
+   ]
+
    # Extract ADMM visualization data if using distributed coordinator
    neighbor_links = None
    admm_iteration_count = None
@@ -106,6 +110,7 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
                     admm_iteration_count=admm_iteration_count,
                     admm_converged=admm_converged,
                     safety_alphas=safety_alphas,
+                    max_safety_zones=max_safety_zones,
                     width=width, height=height, dpi=dpi,
                     elev=elev, azim=azim)
 

@@ -80,6 +80,22 @@ class Drone:
       s_stop = v_norm_sq / (2.0 * u_max_scalar)
       return max(self.safety_zone, self.radius + self.alpha * s_stop)
 
+   def compute_max_adaptive_radius(self) -> float:
+      """Compute the maximum possible adaptive safety radius (at v_max).
+
+      For non-adaptive drones returns safety_zone unchanged.
+      For adaptive drones, computes stopping distance assuming v_max speed.
+
+      :return: maximum safety radius (>= safety_zone).
+      """
+      if not self.is_adaptive:
+         return self.safety_zone
+      u_min, u_max = self.bounds()
+      u_max_scalar = float(np.min(np.abs(u_max)))
+      v_max_sq = self.v_max ** 2
+      s_stop_max = v_max_sq / (2.0 * u_max_scalar)
+      return max(self.safety_zone, self.radius + self.alpha * s_stop_max)
+
    def predict(self, u: np.ndarray) -> np.ndarray:
       return self.physics.step(self.x, u)
 
