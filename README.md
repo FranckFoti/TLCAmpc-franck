@@ -309,7 +309,7 @@ A sweep of 1296 combinations (3 drones, central MPC, `box_8_1_5` room, 200 steps
 **Key insight — safety vs. reachability tradeoff:** Configurations with very high margins (safest) were too conservative for drones to reach their target. Configurations that reached target had tight but safe margins (~0.0). **Recommended balance:** `H=4`, `q_pos=4.0`, `r_u=0.5`, `alpha=0.3–0.4`, `lambda_vel=0.4–0.5`.
 
 <p align="center">
-  <img src="./adaptive_drones_paper/full_adaptive_heatmap.png" width="600" alt="Adaptive Parameter Sweep Heatmap">
+  <img src="doc/adaptive_drones_paper/full_adaptive_heatmap.png" width="600" alt="Adaptive Parameter Sweep Heatmap">
 </p>
 
 #### Adaptive vs. Fixed Sphere Comparison (4 Drones)
