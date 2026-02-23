@@ -44,7 +44,7 @@ class CentralMPCGlobalCoordinator:
          symmetry_break_accel=self.symmetry_break_accel,
       )
 
-   def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None = None,
+   def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None = None,
          room_max: np.ndarray | None = None) -> dict[str, np.ndarray]:
 
       controls, u_sequences = self._solver.solve(

@@ -82,7 +82,7 @@ class CentralMPCAgent(Controller):
 
    # Controller interface: when used standalone, we just apply the first step of the initial guess.
    def control(self, drone: Drone, neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]],
-               obstacles: list[tuple[np.ndarray, float]]) -> np.ndarray:
+               obstacles: list[tuple[np.ndarray, np.ndarray]]) -> np.ndarray:
       return self.central_initial_guess(drone)[0]
 
 

@@ -56,13 +56,13 @@ class DistributedMPCCoordinator:
       self._mailbox = TrajectoryMailbox()
       self._admm_state = ADMMState(rho=self.rho, primal_tol=self.primal_tol, dual_tol=self.dual_tol, horizon=self.horizon, )
 
-   def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None = None,
+   def solve_controls(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None = None,
                       room_max: np.ndarray | None = None, ) -> dict[str, np.ndarray]:
       """Solve for drone controls using distributed ADMM optimization.
       Matches the CentralMPCGlobalCoordinator interface.
 
       :param drones: List of Drone objects to optimize
-      :param obstacles: List of (center, radius) static obstacles
+      :param obstacles: List of (center, half_extents) static obstacles
       :param room_min: Room lower bounds (3,) or None
       :param room_max: Room upper bounds (3,) or None
       :return: Dict mapping drone_id to control (3,) for first timestep
@@ -199,7 +199,7 @@ class DistributedMPCCoordinator:
       return result
 
    def _jacobi(self, drone_order: list[str], drone_by_id: dict[str, Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
-               obstacles: list[tuple[np.ndarray, float]] | None = None, room_min: np.ndarray | None = None,
+               obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None,
                room_max: np.ndarray | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
       """Jacobi update: all drones solve using stale neighbor data, then update all at once."""
       new_trajectories: dict[str, np.ndarray] = {}

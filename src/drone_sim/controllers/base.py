@@ -12,12 +12,12 @@ if TYPE_CHECKING:
 @dataclass
 class Controller:
    def control(self, drone: Drone, neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]],
-               obstacles: list[tuple[np.ndarray, float]]) -> np.ndarray:
+               obstacles: list[tuple[np.ndarray, np.ndarray]]) -> np.ndarray:
       """Return acceleration control u=[a_x,a_y,a_z].
 
       neighbors:
           List of (position, velocity, radius, safety_zone, reference_position).
       obstacles:
-          List of (center, radius).
+          List of (center, half_extents).
       """
       raise NotImplementedError

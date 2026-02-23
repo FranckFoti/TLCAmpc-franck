@@ -73,7 +73,7 @@ class ThreadedMPCCoordinator:
         self,
         *,
         drones: list[Drone],
-        obstacles: list[tuple[np.ndarray, float]],
+        obstacles: list[tuple[np.ndarray, np.ndarray]],
         room_min: np.ndarray | None = None,
         room_max: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
@@ -85,7 +85,7 @@ class ThreadedMPCCoordinator:
         instances for each call (stateless coordinator).
 
         :param drones: List of Drone objects to optimize
-        :param obstacles: Static obstacles as list of (center, radius) tuples
+        :param obstacles: Static obstacles as list of (center, half_extents) tuples
         :param room_min: Room lower bounds (3,) or None
         :param room_max: Room upper bounds (3,) or None
         :return: Dict mapping drone_id to first-step control (3,)

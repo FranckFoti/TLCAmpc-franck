@@ -86,7 +86,7 @@ class GlobalMPCSolver:
          for i, (drone, ctrl) in enumerate(zip(drones, controllers))
       ))
 
-   def _constraints(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None,
+   def _constraints(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None,
                     room_max: np.ndarray | None) -> np.ndarray:
       """Inequality constraints c(u) >= 0 for collision, obstacle, room, and velocity limits."""
       u = self._unpack(u_flat, len(drones))
@@ -105,13 +105,13 @@ class GlobalMPCSolver:
 
       return vals
 
-   def solve(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, float]], room_min: np.ndarray | None = None,
+   def solve(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None = None,
              room_max: np.ndarray | None = None, u_prev: dict[str, np.ndarray] | None = None
    ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
       """Solve the global MPC optimization for all drones.
 
       :param drones: List of Drone objects (only those with central_cost are optimized).
-      :param obstacles: List of (center, radius) static obstacles.
+      :param obstacles: List of (center, half_extents) static obstacles.
       :param room_min: Room lower bounds (3,) or None.
       :param room_max: Room upper bounds (3,) or None.
       :param u_prev: Previous control sequences keyed by drone_id for warm-start.
@@ -197,7 +197,7 @@ class GlobalMPCSolver:
       u_flat: np.ndarray,
       *,
       drones: list[Drone],
-      obstacles: list[tuple[np.ndarray, float]],
+      obstacles: list[tuple[np.ndarray, np.ndarray]],
       room_min: np.ndarray | None,
       room_max: np.ndarray | None,
    ) -> None:

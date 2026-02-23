@@ -83,7 +83,7 @@ class AsyncLocalSolver:
     def run(
         self,
         stop_event: threading.Event,
-        obstacles: list[tuple[np.ndarray, float]] | None = None,
+        obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None,
         room_min: np.ndarray | None = None,
         room_max: np.ndarray | None = None,
     ) -> tuple[np.ndarray | None, np.ndarray | None]:
@@ -95,7 +95,7 @@ class AsyncLocalSolver:
         Follows Phase 15 convention: stop_event is first argument.
 
         :param stop_event: Threading event to signal shutdown
-        :param obstacles: List of (center, radius) static obstacles
+        :param obstacles: List of (center, half_extents) static obstacles
         :param room_min: Room lower bounds (3,) or None
         :param room_max: Room upper bounds (3,) or None
         :return: Tuple of (u_opt, traj_opt) from last successful solve, or (None, None)

@@ -6,6 +6,32 @@ import numpy as np
 from drone_sim.domain.drone import Drone
 
 
+def point_to_box_dist(
+    point: np.ndarray,
+    center: np.ndarray,
+    half_extents: np.ndarray,
+    eps: float = 1e-3,
+) -> float:
+    """Smooth point-to-axis-aligned-box distance, SLSQP-compatible.
+
+    Uses a regularized L2 norm of per-axis excess: sqrt(sum(relu(d)^2) + eps^2) - eps
+    where d_i = |point_i - center_i| - half_extents_i.
+
+    This is positive outside the box, approaches 0 at the box surface, and
+    has a non-zero gradient everywhere (avoiding the flat zero-gradient region
+    inside the box that would stall SLSQP).
+
+    :param point: 3D query point.
+    :param center: Box center (3,).
+    :param half_extents: Box half-sizes per axis (3,).
+    :param eps: Regularization constant — controls smoothness near the surface.
+    :return: Smooth distance >= 0.
+    """
+    d = np.abs(point - center) - half_extents         # signed per-axis excess
+    relu_d = np.maximum(d, 0.0)                        # only positive excess matters
+    return float(np.sqrt(np.dot(relu_d, relu_d) + eps * eps) - eps)
+
+
 def _velocity_at_step(pred_vel: np.ndarray | None, step: int) -> np.ndarray | None:
    """Extract the velocity vector at a given step, or ``None`` if unavailable."""
    if pred_vel is not None:
@@ -175,7 +201,7 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
       self,
       drone: Drone,
       pred_pos: np.ndarray,
-      obstacles: list[tuple[np.ndarray, float]],
+      obstacles: list[tuple[np.ndarray, np.ndarray]],
       values: np.ndarray,
       pred_vel: np.ndarray | None = None,
    ) -> np.ndarray:
@@ -183,7 +209,7 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
 
       :param drone: the drone.
       :param pred_pos: predicted position per time step (shape: (horizon, 3)).
-      :param obstacles: list of obstacles, each a (center, radius) tuple.
+      :param obstacles: list of obstacles, each a (center, half_extents) tuple.
       :param values: combined constraint values to append to.
       :param pred_vel: optional predicted velocities (shape: (horizon, 3)).
                        When provided and the drone is adaptive, per-step adaptive radii are used.
@@ -196,7 +222,7 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
       self,
       drones: list[Drone],
       pred_pos: dict[str, np.ndarray],
-      obstacles: list[tuple[np.ndarray, float]],
+      obstacles: list[tuple[np.ndarray, np.ndarray]],
       values: np.ndarray,
       pred_vel: dict[str, np.ndarray] | None = None,
    ) -> np.ndarray:
@@ -204,7 +230,7 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
 
       :param drones: list of Drones involved.
       :param pred_pos: predicted positions for the drones keyed by drone_id.
-      :param obstacles: list of obstacles, each a (center, radius) tuple.
+      :param obstacles: list of obstacles, each a (center, half_extents) tuple.
       :param values: combined constraint values to append to.
       :param pred_vel: optional dict mapping drone_id to predicted velocity arrays (shape: (horizon, 3)).
       :return: updated values list.
@@ -219,24 +245,25 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
       self,
       drone: Drone,
       pred_pos: np.ndarray,
-      obstacles: list[tuple[np.ndarray, float]],
+      obstacles: list[tuple[np.ndarray, np.ndarray]],
       pred_vel: np.ndarray | None = None,
    ) -> np.ndarray:
       """Evaluate static obstacle constraints.
 
       :param drone: the drone.
       :param pred_pos: predicted positions (horizon, 3).
-      :param obstacles: list of (center, radius) tuples.
+      :param obstacles: list of (center, half_extents) tuples.
       :param pred_vel: optional predicted velocities (horizon, 3).
       :return: constraint margin array.
       """
       result = np.zeros(self._horizon)
-      for center, radius in obstacles:
+      for center, half_extents in obstacles:
          obstacle_center = np.asarray(center, dtype=float).reshape(3)
+         obstacle_half_extents = np.asarray(half_extents, dtype=float).reshape(3)
          for step in range(self._horizon):
             safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
-            dist = float(np.linalg.norm(pred_pos[step] - obstacle_center))
-            result[step] = dist - (safety + radius)
+            dist = point_to_box_dist(pred_pos[step], obstacle_center, obstacle_half_extents)
+            result[step] = dist - safety
       return result
 
 
