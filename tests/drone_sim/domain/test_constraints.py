@@ -286,7 +286,7 @@ class TestObstacleAvoidanceSingle:
         obstacle_avoidance = ObstacleAvoidanceConstraints(horizon=horizon)
         drone = _make_drone(safety_zone=1.0)
         pred_pos = np.zeros((horizon, 3))
-        obstacles = [(np.array([10.0, 0.0, 0.0]), 0.5)]
+        obstacles = [(np.array([10.0, 0.0, 0.0]), np.array([0.5, 0.5, 0.5]))]
         values = np.array([])
 
         result = obstacle_avoidance.evaluate_single(drone, pred_pos, obstacles, values)
@@ -300,8 +300,10 @@ class TestObstacleAvoidanceSingle:
         obstacle_avoidance = ObstacleAvoidanceConstraints(horizon=horizon)
         drone = _make_drone(safety_zone=1.0)
         pred_pos = np.zeros((horizon, 3))
-        # Obstacle at (0.5, 0, 0) with r=0.2, dist=0.5, threshold=1.0+0.2=1.2 => -0.7
-        obstacles = [(np.array([0.5, 0.0, 0.0]), 0.2)]
+        # Obstacle at (0.5, 0, 0) with half_extents=[0.2,0.2,0.2]
+        # point_to_box_dist([0,0,0], [0.5,0,0], [0.2,0.2,0.2]) = 0.3 (face approach)
+        # margin = 0.3 - 1.0 = -0.7 => still negative
+        obstacles = [(np.array([0.5, 0.0, 0.0]), np.array([0.2, 0.2, 0.2]))]
         values = np.array([])
 
         result = obstacle_avoidance.evaluate_single(drone, pred_pos, obstacles, values)
@@ -323,18 +325,20 @@ class TestObstacleAvoidanceSingle:
         assert result.shape == (horizon,)
 
     def test_exact_margin_value(self):
-        """Verify exact margin: dist - (safety_zone + obstacle_radius)."""
+        """Verify exact margin: point_to_box_dist - safety_zone."""
         horizon = 1
         obstacle_avoidance = ObstacleAvoidanceConstraints(horizon=horizon)
         drone = _make_drone(safety_zone=0.5)
         pred_pos = np.array([[0.0, 0.0, 0.0]])
-        # Obstacle at (3, 0, 0) with r=0.3, dist=3.0, threshold=0.5+0.3=0.8
-        obstacles = [(np.array([3.0, 0.0, 0.0]), 0.3)]
+        # Obstacle at (3, 0, 0) with half_extents=[0.3,0.3,0.3]
+        # point_to_box_dist([0,0,0], [3,0,0], [0.3,0.3,0.3]) ~= 2.7 (face approach, eps regularized)
+        # margin ~= 2.7 - 0.5 = 2.2 (tolerance 1e-3 for regularization eps)
+        obstacles = [(np.array([3.0, 0.0, 0.0]), np.array([0.3, 0.3, 0.3]))]
         values = np.array([])
 
         result = obstacle_avoidance.evaluate_single(drone, pred_pos, obstacles, values)
 
-        assert result[0] == pytest.approx(2.2)
+        assert result[0] == pytest.approx(2.2, abs=1e-3)
 
     def test_appends_to_existing_values(self):
         """evaluate_single concatenates to existing values."""
@@ -342,7 +346,7 @@ class TestObstacleAvoidanceSingle:
         obstacle_avoidance = ObstacleAvoidanceConstraints(horizon=horizon)
         drone = _make_drone(safety_zone=0.5)
         pred_pos = np.zeros((horizon, 3))
-        obstacles = [(np.array([10.0, 0.0, 0.0]), 0.5)]
+        obstacles = [(np.array([10.0, 0.0, 0.0]), np.array([0.5, 0.5, 0.5]))]
         existing = np.array([7.0])
 
         result = obstacle_avoidance.evaluate_single(drone, pred_pos, obstacles, existing)
@@ -365,7 +369,7 @@ class TestObstacleAvoidanceMulti:
             "d1": np.zeros((horizon, 3)),
             "d2": np.ones((horizon, 3)) * 20.0,
         }
-        obstacles = [(np.array([50.0, 50.0, 50.0]), 0.5)]
+        obstacles = [(np.array([50.0, 50.0, 50.0]), np.array([0.5, 0.5, 0.5]))]
         values = np.array([])
 
         result = obstacle_avoidance.evaluate_multi(drones, pred_pos, obstacles, values)
@@ -384,7 +388,7 @@ class TestObstacleAvoidanceMulti:
             "d1": np.zeros((horizon, 3)),  # at origin
             "d2": np.ones((horizon, 3)) * 100.0,  # far away
         }
-        obstacles = [(np.array([0.5, 0.0, 0.0]), 0.5)]  # close to d1
+        obstacles = [(np.array([0.5, 0.0, 0.0]), np.array([0.5, 0.5, 0.5]))]  # close to d1
         values = np.array([])
 
         result = obstacle_avoidance.evaluate_multi(drones, pred_pos, obstacles, values)
@@ -722,23 +726,22 @@ class TestAdaptiveConstraints:
         """Adaptive drone near static obstacle with high velocity.
 
         velocity=[4,0,0]: adaptive_radius = max(1.0, 0.2 + 0.5*8/3) = 1.5333
-        obstacle at (5,0,0) with radius=0.3
-        threshold = 1.5333 + 0.3 = 1.8333
-        dist = 5.0
-        margin = 5.0 - 1.8333 = 3.1667
+        obstacle at (5,0,0) with half_extents=[0.3,0.3,0.3]
+        point_to_box_dist([0,0,0], [5,0,0], [0.3,0.3,0.3]) = 5.0 - 0.3 = 4.7 (face approach)
+        margin = 4.7 - ar (safety = adaptive radius)
         """
         horizon = 1
         constraints = ObstacleAvoidanceConstraints(horizon=horizon)
         drone = _make_drone(safety_zone=1.0, alpha=0.5)
         pred_pos = np.array([[0.0, 0.0, 0.0]])
-        obstacles = [(np.array([5.0, 0.0, 0.0]), 0.3)]
+        obstacles = [(np.array([5.0, 0.0, 0.0]), np.array([0.3, 0.3, 0.3]))]
         pred_vel = np.array([[4.0, 0.0, 0.0]])
 
         result = constraints.evaluate_single(drone, pred_pos, obstacles, np.array([]), pred_vel=pred_vel)
 
         ar = 0.2 + 0.5 * (16.0 / 6.0)  # 1.5333
-        expected_margin = 5.0 - (ar + 0.3)
-        assert result[0] == pytest.approx(expected_margin)
+        expected_margin = 4.7 - ar  # ~3.1667 (tolerance 1e-3 for regularization eps)
+        assert result[0] == pytest.approx(expected_margin, abs=1e-3)
 
     def test_room_constraints_adaptive_box(self):
         """Adaptive drone in box room. Wall clearance uses adaptive radius.

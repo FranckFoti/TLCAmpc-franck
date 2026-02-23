@@ -423,8 +423,8 @@ class TestThreadedCoordinatorIntegration:
 
         drone1 = create_test_drone("drone-1", np.array([0.0, 0.0, 0.0]))
 
-        # Obstacle at (2, 0, 0) with radius 0.5
-        obstacles = [(np.array([2.0, 0.0, 0.0]), 0.5)]
+        # Obstacle at (2, 0, 0) with half_extents [0.5, 0.5, 0.5]
+        obstacles = [(np.array([2.0, 0.0, 0.0]), np.array([0.5, 0.5, 0.5]))]
 
         result = coordinator.solve_controls(drones=[drone1], obstacles=obstacles)
 

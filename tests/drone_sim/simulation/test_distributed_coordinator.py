@@ -295,7 +295,7 @@ class TestDistributedCoordinatorWithObstacles:
             drones=[
                 _make_drone("d1", np.array([0, 0, 0, 1, 0, 0], dtype=float), np.array([5, 0, 0], dtype=float), controller),
             ],
-            obstacles=[(np.array([2, 0, 0]), 0.5)],  # Obstacle at x=2
+            obstacles=[(np.array([2, 0, 0]), np.array([0.5, 0.5, 0.5]))],  # Obstacle at x=2
         )
 
         assert "d1" in result

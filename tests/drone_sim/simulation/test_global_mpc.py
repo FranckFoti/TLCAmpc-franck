@@ -180,7 +180,7 @@ class TestGlobalMPCSolverConstraints:
       horizon = solver.horizon
       d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), np.zeros(3), CentralMPCAgent(dt=solver.dt))
       u_flat = np.zeros(num_drones * horizon * 3)
-      obstacles = [(np.array([0.5, 0.0, 0.0]), 0.2)]
+      obstacles = [(np.array([0.5, 0.0, 0.0]), np.array([0.2, 0.2, 0.2]))]
 
       g = solver._constraints(
          u_flat,
@@ -261,7 +261,7 @@ class TestGlobalMPCSolverConstraintIntegration:
       horizon = solver.horizon
       d1 = _make_drone("d1", np.zeros(6), np.zeros(3), CentralMPCAgent(dt=solver.dt))
       pred_pos = np.zeros((horizon, 3))
-      obstacles = [(np.array([5.0, 0.0, 0.0]), 0.5)]
+      obstacles = [(np.array([5.0, 0.0, 0.0]), np.array([0.5, 0.5, 0.5]))]
 
       obstacle_avoidance = ObstacleAvoidanceConstraints(horizon=horizon)
       result = obstacle_avoidance.evaluate_single(d1, pred_pos, obstacles, np.array([]))

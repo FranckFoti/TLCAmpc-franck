@@ -100,7 +100,7 @@ class TestLocalMPCSolver:
             controller=controller,
         )
 
-        obstacles = [(np.array([2.0, 0.0, 0.0]), 0.5)]
+        obstacles = [(np.array([2.0, 0.0, 0.0]), np.array([0.5, 0.5, 0.5]))]
 
         u_opt, traj_opt, success = solver.solve(
             drone=drone,
@@ -186,10 +186,10 @@ class TestLocalMPCSolver:
         )
 
         obstacles = [
-            (np.array([1.0, 0.0, 0.0]), 0.3),
-            (np.array([-1.0, 0.0, 0.0]), 0.3),
-            (np.array([0.0, 1.0, 0.0]), 0.3),
-            (np.array([0.0, -1.0, 0.0]), 0.3),
+            (np.array([1.0, 0.0, 0.0]), np.array([0.3, 0.3, 0.3])),
+            (np.array([-1.0, 0.0, 0.0]), np.array([0.3, 0.3, 0.3])),
+            (np.array([0.0, 1.0, 0.0]), np.array([0.3, 0.3, 0.3])),
+            (np.array([0.0, -1.0, 0.0]), np.array([0.3, 0.3, 0.3])),
         ]
 
         u_opt, traj_opt, success = solver.solve(
