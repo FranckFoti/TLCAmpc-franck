@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 
 import numpy as np
 
-from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints, VelocityConstraints)
+from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints, VelocityConstraints,
+                                          _safety_radius, _velocity_at_step)
 from drone_sim.domain.drone import Drone, has_central_cost
 from drone_sim.simulation.distributed.local_mpc import _pad_or_trim_horizon
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,12 +83,83 @@ class GlobalMPCSolver:
 
       return u0 + deltas
 
+   def _constraint_breakdown(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None,
+         room_max: np.ndarray | None) -> dict[str, dict[str, np.ndarray]]:
+      """Return per-category constraint margins keyed by label.
+
+      Returns a dict with keys 'collision', 'room', 'velocity', each mapping
+      a human-readable label to a margin array (horizon,) where negative values
+      indicate constraint violations.
+      """
+      u = self._unpack(u_flat, len(drones))
+      states = self._predict_states(drones, u)
+      pred_pos = {d.drone_id: states[i, :, :3] for i, d in enumerate(drones)}
+      pred_vel = {d.drone_id: states[i, :, 3:6] for i, d in enumerate(drones)}
+
+      # Collision: one (horizon,) array per i<j pair
+      collision: dict[str, np.ndarray] = {}
+      for i in range(len(drones)):
+         for j in range(i + 1, len(drones)):
+            di, dj = drones[i], drones[j]
+            pi = pred_pos[di.drone_id]
+            pj = pred_pos[dj.drone_id]
+            vi = pred_vel[di.drone_id]
+            vj = pred_vel[dj.drone_id]
+            margins = np.zeros(self.horizon)
+            for step in range(self.horizon):
+               si = _safety_radius(di, _velocity_at_step(vi, step))
+               sj = _safety_radius(dj, _velocity_at_step(vj, step))
+               dist = float(np.linalg.norm(pi[step] - pj[step]))
+               margins[step] = dist - (si + sj + di.cons_stop + dj.cons_stop)
+            collision[f"{di.drone_id}↔{dj.drone_id}"] = margins
+
+      # Room: one (horizon*6,) array per drone (lower/upper per axis)
+      room: dict[str, np.ndarray] = {}
+      if room_min is not None and room_max is not None:
+         lb = np.asarray(room_min, dtype=float)
+         ub = np.asarray(room_max, dtype=float)
+         for i, d in enumerate(drones):
+            parts = []
+            for step in range(self.horizon):
+               pos = pred_pos[d.drone_id][step]
+               safety = _safety_radius(d, _velocity_at_step(pred_vel[d.drone_id], step))
+               for axis in range(3):
+                  parts.append(pos[axis] - safety - lb[axis] + self.room_wall_tolerance)
+                  parts.append(ub[axis] - (pos[axis] + safety) + self.room_wall_tolerance)
+            room[d.drone_id] = np.array(parts)
+
+      # Velocity: one (horizon,) array per drone
+      velocity: dict[str, np.ndarray] = {}
+      for i, d in enumerate(drones):
+         speed_sq = np.sum(states[i, :, 3:6] ** 2, axis=1)
+         velocity[d.drone_id] = d.v_max ** 2 - speed_sq
+
+      return {"collision": collision, "room": room, "velocity": velocity}
+
+   def _log_constraint_breakdown(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None,
+         room_max: np.ndarray | None) -> None:
+      """Log per-category constraint margins. Violations always logged at WARNING."""
+      bd = self._constraint_breakdown(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
+
+      for label, margins in bd["collision"].items():
+         msg = f"  collision {label}: min={margins.min():.3e}  per-step={np.round(margins, 4).tolist()}"
+         if margins.min() < 0:
+            _log.warning(msg)
+
+      for drone_id, margins in bd["room"].items():
+         msg = f"  room     {drone_id}: min={margins.min():.3e}"
+         if margins.min() < 0:
+            _log.warning(msg)
+
+      for drone_id, margins in bd["velocity"].items():
+         msg = f"  velocity {drone_id}: min={margins.min():.3e}"
+         if margins.min() < 0:
+            _log.warning(msg)
+
    def _cost(self, u_flat: np.ndarray, *, drones: list[Drone], controllers: list[object], clip_u) -> float:
       u = clip_u(self._unpack(u_flat, len(drones)))
-      return float(sum(
-         ctrl.central_cost(u[i], drone)  # type: ignore[attr-defined]
-         for i, (drone, ctrl) in enumerate(zip(drones, controllers))
-      ))
+      return float(sum(ctrl.central_cost(u[i], drone)  # type: ignore[attr-defined]
+                       for i, (drone, ctrl) in enumerate(zip(drones, controllers))))
 
    def _constraints(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None,
                     room_max: np.ndarray | None) -> np.ndarray:
@@ -106,8 +181,7 @@ class GlobalMPCSolver:
       return vals
 
    def solve(self, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None = None,
-             room_max: np.ndarray | None = None, u_prev: dict[str, np.ndarray] | None = None
-   ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+             room_max: np.ndarray | None = None, u_prev: dict[str, np.ndarray] | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
       """Solve the global MPC optimization for all drones.
 
       :param drones: List of Drone objects (only those with central_cost are optimized).
@@ -147,40 +221,41 @@ class GlobalMPCSolver:
          u0 = self._apply_symmetry_break(u0)
       else:
          # Build per-drone initial guesses, trim/pad to solver horizon
-         u_guess = [
-            _pad_or_trim_horizon(ctrl.central_initial_guess(d), self.horizon)  # type: ignore[attr-defined]
-            for d, ctrl in zip(opt_drones, opt_controllers)
-         ]
+         u_guess = [_pad_or_trim_horizon(ctrl.central_initial_guess(d), self.horizon)  # type: ignore[attr-defined]
+               for d, ctrl in zip(opt_drones, opt_controllers)]
 
          u_guess = self._apply_symmetry_break(np.stack(u_guess, axis=0))
 
          # Backtrack alpha until initial guess is feasible (or fall back to zeros)
          alpha = 1.0
+         _backtrack_feasible = False
          for _ in range(12):
             u0 = clip_u(alpha * u_guess)
             g = self._constraints(self._pack(u0), drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
             if g.min(initial=0.0) >= 0.0:
+               _backtrack_feasible = True
                break
             alpha *= 0.5
          else:
             u0 = np.zeros_like(u0)
+            _log.warning("GlobalMPC: initial guess infeasible at all scales (alpha 1.0 -> %.4f), falling back to u=zeros", alpha)
+
+         if _backtrack_feasible and alpha < 1.0 - 1e-9:
+            _log.debug("GlobalMPC: initial guess needed backtracking to alpha=%.4f", alpha)
 
       # Per-variable bounds: repeat each drone's (min, max) for every horizon step and axis
-      bounds = [
-         (float(u_mins[j, axis]), float(u_maxs[j, axis]))
-         for j in range(num_optimized)
-         for _ in range(self.horizon)
-         for axis in range(3)
-      ]
+      bounds = [(float(u_mins[j, axis]), float(u_maxs[j, axis])) for j in range(num_optimized) for _ in range(self.horizon) for axis in range(3)]
 
-      cons = {"type": "ineq", "fun": lambda u_flat: self._constraints(
-         u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)}
+      cons = {"type": "ineq", "fun": lambda u_flat: self._constraints(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)}
 
-      res = minimize(
-         lambda u_flat: self._cost(u_flat, drones=opt_drones, controllers=opt_controllers, clip_u=clip_u),
-         self._pack(u0), method="SLSQP", bounds=bounds, constraints=[cons],
-         options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False},
-      )
+      res = minimize(lambda u_flat: self._cost(u_flat, drones=opt_drones, controllers=opt_controllers, clip_u=clip_u), self._pack(u0), method="SLSQP",
+            bounds=bounds, constraints=[cons], options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})
+
+      _log.debug("GlobalMPC: SLSQP done — success=%s nit=%d nfev=%d fun=%.4f msg='%s'", res.success, res.nit, res.nfev,
+            res.fun if np.isfinite(res.fun) else float("nan"), res.message)
+      if res.nit >= self.max_iter:
+         _log.warning("GlobalMPC: SLSQP hit iteration limit (%d/%d) — solution may be infeasible", res.nit, self.max_iter)
+      self._log_constraint_breakdown(res.x, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
 
       if not res.success or not np.isfinite(res.fun):
          raise RuntimeError(f"CentralMPCGlobalCoordinator optimization failed: {res.message} (status={res.status})")
@@ -192,19 +267,14 @@ class GlobalMPCSolver:
       sequences = {did: u_opt[k] for k, did in enumerate(opt_ids)}
       return controls, sequences
 
-   def _validate_constraint_margins(
-      self,
-      u_flat: np.ndarray,
-      *,
-      drones: list[Drone],
-      obstacles: list[tuple[np.ndarray, np.ndarray]],
-      room_min: np.ndarray | None,
-      room_max: np.ndarray | None,
-   ) -> None:
+   def _validate_constraint_margins(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]],
+         room_min: np.ndarray | None, room_max: np.ndarray | None) -> None:
       """Raise RuntimeError if the solution violates constraints beyond numerical tolerance."""
       g = self._constraints(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
       min_margin = float(g.min(initial=np.inf)) if g.size else float("inf")
       if not np.isfinite(min_margin):
          raise RuntimeError("CentralMPCGlobalCoordinator produced non-finite constraint margins.")
       if min_margin < -1e-6:
+         _log.warning("GlobalMPC: constraint violation detected (min margin=%.3e) — breakdown:", min_margin)
+         self._log_constraint_breakdown(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
          raise RuntimeError(f"CentralMPCGlobalCoordinator produced infeasible controls: min constraint margin {min_margin:.3e} < 0.")
