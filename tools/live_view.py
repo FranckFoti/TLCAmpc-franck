@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import logging
 import sys
 import time
 from pathlib import Path
@@ -172,6 +173,8 @@ def _parse_kv_params(items: list[str]) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> None:
    p = argparse.ArgumentParser(description="Live-view DroneSim by stepping the simulator and rendering in-process")
+   p.add_argument("--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                  help="Logging level (default: WARNING; use DEBUG for full SLSQP + constraint breakdown)")
    p.add_argument("--config",
                   help="Either a JSON file path (e.g. configs/2DronesHorizon2.json) or param has to set at least 'num_drones' and 'horizon'")
 
@@ -192,6 +195,7 @@ def main(argv: list[str] | None = None) -> None:
    p.add_argument("--azim", type=float, default=-60.0)
 
    args = p.parse_args(argv)
+   logging.basicConfig(level=getattr(logging, args.log_level), format="%(name)s %(levelname)s %(message)s")
 
    params = _parse_kv_params(args.param)
    config_str = args.config
