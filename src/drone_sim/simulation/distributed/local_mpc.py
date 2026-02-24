@@ -44,8 +44,9 @@ class LocalMPCSolver:
    f_tol: float = 1e-4
    symmetry_break_eps: float = 0.05  # Random noise magnitude for symmetry breaking
 
-   def solve(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]], obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None,
-         room_min: np.ndarray | None = None, room_max: np.ndarray | None = None, u_prev: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, bool]:
+   def solve(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]],
+             obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None, room_max: np.ndarray | None = None,
+             u_prev: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, bool]:
       """ Solve local MPC problem for a single drone.
 
       :param drone: Drone object with state, route, controller, and physics
@@ -77,9 +78,7 @@ class LocalMPCSolver:
 
       # Symmetry-breaking noise to prevent collinear deadlocks
       if self.symmetry_break_eps > 0:
-         noise = np.random.uniform(
-            -self.symmetry_break_eps, self.symmetry_break_eps, size=u0.shape,
-         )
+         noise = np.random.uniform(-self.symmetry_break_eps, self.symmetry_break_eps, size=u0.shape, )
          u0 = np.clip(u0 + noise, u_min, u_max)
 
       # Pre-build constraint evaluators (stateless, depend only on horizon)
@@ -111,7 +110,7 @@ class LocalMPCSolver:
 
       # Optimize
       result = minimize(cost, u0.flatten(), method="SLSQP", bounds=bounds, constraints={"type": "ineq", "fun": constraints},
-            options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})
+                        options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})
 
       u_opt = np.clip(result.x.reshape((horizon, 3)), u_min, u_max)
       traj_opt, _ = self._predict_states(drone, u_opt)
@@ -122,25 +121,15 @@ class LocalMPCSolver:
 
       # Infeasible fallback: decelerate, then hold position
       if not feasible:
-         u_opt, traj_opt, feasible = self._infeasible_fallback(
-            drone, u_opt, traj_opt, constraints, u_min, u_max, horizon,
-         )
+         u_opt, traj_opt, feasible = self._infeasible_fallback(drone, u_opt, traj_opt, constraints, u_min, u_max, horizon, )
 
       if _log.isEnabledFor(logging.DEBUG):
          self._debug_log_feasibility_check(drone, neighbor_trajectories, feasible, result, traj_opt, g)
 
       return u_opt, traj_opt, feasible
 
-   def _infeasible_fallback(
-      self,
-      drone: Drone,
-      u_opt: np.ndarray,
-      traj_opt: np.ndarray,
-      constraints_fn,
-      u_min: np.ndarray,
-      u_max: np.ndarray,
-      horizon: int,
-   ) -> tuple[np.ndarray, np.ndarray, bool]:
+   def _infeasible_fallback(self, drone: Drone, u_opt: np.ndarray, traj_opt: np.ndarray, constraints_fn, u_min: np.ndarray, u_max: np.ndarray,
+         horizon: int, ) -> tuple[np.ndarray, np.ndarray, bool]:
       """Try safe fallback controls when the optimizer returns infeasible.
 
       Fallback order:
@@ -169,11 +158,7 @@ class LocalMPCSolver:
          return u_zero, traj_zero, True
 
       # All fallbacks failed — pick the least-violating option
-      options = [
-         (u_opt, traj_opt, constraints_fn(u_opt.flatten())),
-         (u_decel, traj_decel, g_decel),
-         (u_zero, traj_zero, g_zero),
-      ]
+      options = [(u_opt, traj_opt, constraints_fn(u_opt.flatten())), (u_decel, traj_decel, g_decel), (u_zero, traj_zero, g_zero), ]
       best_u, best_traj, _ = max(options, key=lambda o: o[2].min() if len(o[2]) else 0.0)
       _log.debug("  fallback: ALL FAILED for %s, using least-violating", drone.drone_id)
       return best_u, best_traj, False
@@ -198,12 +183,12 @@ class LocalMPCSolver:
 
       return positions, velocities
 
-   def _debug_log_feasibility_check(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray]], feasible: bool,
-                                         result: OptimizeResult, traj_opt: np.ndarray, g: np.ndarray):
-      _log.debug("SOLVE %s  feasible=%s  opt_success=%s  g_min=%.4f  cost=%.4f",
-                 drone.drone_id, feasible, result.success, g.min() if len(g) else float("nan"), result.fun)
+   def _debug_log_feasibility_check(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray]], feasible: bool, result: OptimizeResult,
+                                    traj_opt: np.ndarray, g: np.ndarray):
+      _log.debug("SOLVE %s  feasible=%s  opt_success=%s  g_min=%.4f  cost=%.4f", drone.drone_id, feasible, result.success, g.min() if len(g) else float("nan"),
+                 result.fun)
       for nid, (ntraj, nvel) in neighbor_trajectories.items():
          ntraj = np.asarray(ntraj, dtype=float).reshape((-1, 3))
          dists = np.linalg.norm(traj_opt - ntraj, axis=1)
-         _log.debug("  neighbor=%s  dists=%s  safety_ego=%.2f  safety_nbr=%.2f  threshold=%.2f",
-                    nid, np.round(dists, 3), drone.safety_zone, drone.safety_zone, 2 * drone.safety_zone)
+         _log.debug("  neighbor=%s  dists=%s  safety_ego=%.2f  safety_nbr=%.2f  threshold=%.2f", nid, np.round(dists, 3), drone.safety_zone, drone.safety_zone,
+                    2 * drone.safety_zone)

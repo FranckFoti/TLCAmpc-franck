@@ -412,6 +412,7 @@ class TestThreadedCoordinatorIntegration:
             assert result[drone_id].shape == (3,)
             assert np.all(np.isfinite(result[drone_id]))
 
+    @pytest.mark.slow
     def test_with_obstacles(self):
         """Test solve_controls with obstacles parameter."""
         coordinator = ThreadedMPCCoordinator(

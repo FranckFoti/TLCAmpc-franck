@@ -58,7 +58,6 @@ def _draw_ghost_max_sphere(ax: object, drone: Drone, print_always: bool = False)
       # only draw if meaningfully larger
       if print_always or max_r > float(drone.safety_zone) + 1e-4:
          _draw_sphere_wireframe(ax, pos, max_r, color=drone.safety_color, alpha=0.12, lw=0.4)
-         print(f"sphere: {drone.safety_zone} max sphere: {max_r}")
 
 
 def _draw_trace(ax: object, trace: list[np.ndarray], drone: Drone) -> None:

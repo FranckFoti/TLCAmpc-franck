@@ -158,8 +158,7 @@ class GlobalMPCSolver:
 
    def _cost(self, u_flat: np.ndarray, *, drones: list[Drone], controllers: list[object], clip_u) -> float:
       u = clip_u(self._unpack(u_flat, len(drones)))
-      return float(sum(ctrl.central_cost(u[i], drone)  # type: ignore[attr-defined]
-                       for i, (drone, ctrl) in enumerate(zip(drones, controllers))))
+      return float(sum(ctrl.central_cost(u[i], drone) for i, (drone, ctrl) in enumerate(zip(drones, controllers)))) # type: ignore[attr-defined]
 
    def _constraints(self, u_flat: np.ndarray, *, drones: list[Drone], obstacles: list[tuple[np.ndarray, np.ndarray]], room_min: np.ndarray | None,
                     room_max: np.ndarray | None) -> np.ndarray:
@@ -221,8 +220,7 @@ class GlobalMPCSolver:
          u0 = self._apply_symmetry_break(u0)
       else:
          # Build per-drone initial guesses, trim/pad to solver horizon
-         u_guess = [_pad_or_trim_horizon(ctrl.central_initial_guess(d), self.horizon)  # type: ignore[attr-defined]
-               for d, ctrl in zip(opt_drones, opt_controllers)]
+         u_guess = [_pad_or_trim_horizon(ctrl.central_initial_guess(d), self.horizon) for d, ctrl in zip(opt_drones, opt_controllers)] # type: ignore[attr-defined]
 
          u_guess = self._apply_symmetry_break(np.stack(u_guess, axis=0))
 

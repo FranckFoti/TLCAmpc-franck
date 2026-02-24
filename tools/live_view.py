@@ -173,7 +173,7 @@ def _parse_kv_params(items: list[str]) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> None:
    p = argparse.ArgumentParser(description="Live-view DroneSim by stepping the simulator and rendering in-process")
-   p.add_argument("--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+   p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                   help="Logging level (default: WARNING; use DEBUG for full SLSQP + constraint breakdown)")
    p.add_argument("--config",
                   help="Either a JSON file path (e.g. configs/2DronesHorizon2.json) or param has to set at least 'num_drones' and 'horizon'")
@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> None:
    p.add_argument("--steps", type=int, default=1000)
    p.add_argument("--step-n", type=int, default=1)
    p.add_argument("--sleep", type=float, default=0.05)
-   p.add_argument("--trace-len", type=int, default=500)
+   p.add_argument("--trace-len", type=int, default=1000)
 
    p.add_argument("--record-dir", default=None, help="If set, write PNG frames into this directory")
    p.add_argument("--gif", dest="gif_path", default=None, help="If set, write an animated GIF to this path")

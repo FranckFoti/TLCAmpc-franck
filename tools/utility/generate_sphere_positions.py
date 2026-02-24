@@ -249,5 +249,5 @@ def main_box(n_drones: int, room_size: float, r_sphere: float) -> None:
 
 
 if __name__ == "__main__":
-   main_box(5, 9, 2)
+   main_box(4, 5, 1.6)
    # main_sphere(5, 5.58, 2)
