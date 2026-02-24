@@ -104,8 +104,7 @@ def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int
 
    def render_frame(sim: Simulator):
       # Render current frame
-      traces = [[] if trace_len == 0 else sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones]
-      safety_zones = [float(d.safety_zone) for d in sim.drones]
+      traces = {d.drone_id: [] if trace_len == 0 else sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones}
 
       is_distributed = scenario.coordinator.type == "dmpc_admm"
       neighbor_links = None
@@ -113,9 +112,7 @@ def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int
       admm_converged = sim.coordinator.get_last_converged() if is_distributed else None
 
       try:
-         png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max, drone_positions=[d.position() for d in sim.drones],
-                                drone_radii=[d.radius for d in sim.drones], drone_safety_zones=safety_zones, drone_colors=[d.color for d in sim.drones],
-                                safety_colors=[d.safety_color for d in sim.drones], trace_colors=[d.trace_color for d in sim.drones], drone_traces=traces,
+         png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max, drones=sim.drones, drone_traces=traces,
                                 obstacles=sim.obstacles, step_count=sim.step_count, compute_time_s=sim.compute_time_s, neighbor_links=neighbor_links,
                                 admm_iteration_count=admm_iteration_count, admm_converged=admm_converged, width=GIF_WIDTH, height=GIF_HEIGHT, dpi=DPI,
                                 elev=ELEV, azim=AZIM)

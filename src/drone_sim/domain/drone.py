@@ -74,27 +74,29 @@ class Drone:
       """
       if not self.is_adaptive:
          return self.safety_zone
-      u_min, u_max = self.bounds()
-      u_max_scalar = float(np.min(np.abs(u_max)))
-      v_norm_sq = float(np.dot(velocity, velocity))
-      s_stop = v_norm_sq / (2.0 * u_max_scalar)
-      return max(self.safety_zone, self.radius + self.alpha * s_stop)
+      return self._compute_adaptive_radius_impl(float(np.linalg.norm(velocity)))
 
    def compute_max_adaptive_radius(self) -> float:
-      """Compute the maximum possible adaptive safety radius (at v_max).
+      """ returns the maximum adaptive radius for the drone
 
-      For non-adaptive drones returns safety_zone unchanged.
-      For adaptive drones, computes stopping distance assuming v_max speed.
-
-      :return: maximum safety radius (>= safety_zone).
+      :return: maximum adaptive radius
       """
       if not self.is_adaptive:
          return self.safety_zone
+      return self._compute_adaptive_radius_impl(self.v_max)
+
+   def _compute_adaptive_radius_impl(self, velocity: float) -> float:
+      """ do calculation with the scalar of the velocity vector
+
+      :param velocity: velocity norm
+      :return:
+      """
       u_min, u_max = self.bounds()
-      u_max_scalar = float(np.min(np.abs(u_max)))
-      v_max_sq = self.v_max ** 2
-      s_stop_max = v_max_sq / (2.0 * u_max_scalar)
-      return max(self.safety_zone, self.radius + self.alpha * s_stop_max)
+      u_max_scalar = float(np.max(np.abs(u_max)))
+      v_norm_sq = float(np.dot(velocity, velocity))  # np.linalg.norm(velocity) ** 2
+      s_stop = v_norm_sq / (2.0 * u_max_scalar)
+      # print(f"v: {velocity}, v_norm_sq: {v_norm_sq}, u_max_scalar: {u_max_scalar}, s_stop: {s_stop} -> {self.safety_zone + self.alpha * s_stop}")
+      return self.safety_zone + self.alpha * s_stop  # return max(self.safety_zone, self.safety_zone + self.alpha * s_stop) # safety_zone is r_min for the adaptive case, maybe we have to change to something like r_min!!!  # u_max_scalar = float(np.max(np.abs(u_max))) #TODO check! ich glaube so ists richtig... # float(np.min(np.abs(u_max))) # TODO: check if this is correct: wanted is longest break way ... u_max? should be abs(u_min) ... np.abs(np.min(u_min))?
 
    def predict(self, u: np.ndarray) -> np.ndarray:
       return self.physics.step(self.x, u)

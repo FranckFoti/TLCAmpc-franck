@@ -13,7 +13,7 @@ import numpy as np
 from unittest.mock import MagicMock
 
 from drone_sim.api.render import render_png, _draw_room_wireframe, _draw_sphere_wireframe, _draw_box_wireframe
-
+from drone_sim.domain.drone import Drone
 
 class TestDrawRoomWireframe:
    """Tests for _draw_room_wireframe helper function."""
@@ -152,12 +152,7 @@ class TestRenderPng:
       return {
          "room_min": np.array([0.0, 0.0, 0.0]),
          "room_max": np.array([10.0, 10.0, 10.0]),
-         "drone_positions": [],
-         "drone_radii": [],
-         "drone_safety_zones": [],
-         "drone_colors": [],
-         "safety_colors": [],
-         "trace_colors": [],
+         "drones": [],
          "drone_traces": [],
          "obstacles": [],
          "step_count": 0,
@@ -190,13 +185,15 @@ class TestRenderPng:
 
    def test_render_png_with_drones(self, minimal_render_kwargs):
       """Test render_png with drone positions."""
-      minimal_render_kwargs["drone_positions"] = [np.array([1.0, 1.0, 1.0]), np.array([5.0, 5.0, 5.0])]
-      minimal_render_kwargs["drone_radii"] = [0.2, 0.3]
-      minimal_render_kwargs["drone_safety_zones"] = [1.0, 1.5]
-      minimal_render_kwargs["drone_colors"] = ["tab:blue", "tab:orange"]
-      minimal_render_kwargs["safety_colors"] = ["tab:cyan", "tab:red"]
-      minimal_render_kwargs["trace_colors"] = ["blue", "orange"]
-      minimal_render_kwargs["drone_traces"] = [[], []]
+      minimal_render_kwargs["drones"] = [Drone(drone_id=f"drone-1", radius=0.2, safety_zone=1.0,
+                                               x=np.array([1.0, 1.0, 1.0,1.0,1.0,1.0]), color="tab:blue",
+                                               safety_color="tab:cyan", trace_color="blue",
+                                               cons_stop=0.0, controller=None, physics=None, route=None),
+                                         Drone(drone_id=f"drone-2", radius=0.3, safety_zone=1.5,
+                                               x=np.array([5.0, 5.0, 5.0,1.0,1.0,1.0]), color="tab:orange",
+                                               safety_color="tab:red", trace_color="orange",
+                                               cons_stop=0.0, controller=None, physics=None, route=None)]
+      minimal_render_kwargs["drone_traces"] = {"drone-1": [], "drone-2": []}
 
       result = render_png(**minimal_render_kwargs)
 
@@ -205,19 +202,9 @@ class TestRenderPng:
 
    def test_render_png_with_traces(self, minimal_render_kwargs):
       """Test render_png with drone traces."""
-      minimal_render_kwargs["drone_positions"] = [np.array([5.0, 5.0, 5.0])]
-      minimal_render_kwargs["drone_radii"] = [0.2]
-      minimal_render_kwargs["drone_safety_zones"] = [1.0]
-      minimal_render_kwargs["drone_colors"] = ["blue"]
-      minimal_render_kwargs["safety_colors"] = ["cyan"]
-      minimal_render_kwargs["trace_colors"] = ["blue"]
-      minimal_render_kwargs["drone_traces"] = [[
-         np.array([1.0, 1.0, 1.0]),
-         np.array([2.0, 2.0, 2.0]),
-         np.array([3.0, 3.0, 3.0]),
-         np.array([4.0, 4.0, 4.0]),
-         np.array([5.0, 5.0, 5.0])
-      ]]
+      minimal_render_kwargs["drones"] = [Drone(drone_id=f"drone-1", radius=0.2, safety_zone=1.0, x=np.array([5.0, 5.0, 5.0, 1.0, 1.0, 1.0]), color="blue", safety_color="cyan",
+                  trace_color="blue", cons_stop=0.0, controller=None, physics=None, route=None)]
+      minimal_render_kwargs["drone_traces"] = {"drone-1": [np.array([1.0, 1.0, 1.0]), np.array([2.0, 2.0, 2.0]), np.array([3.0, 3.0, 3.0]), np.array([4.0, 4.0, 4.0]), np.array([5.0, 5.0, 5.0])]}
 
       result = render_png(**minimal_render_kwargs)
 
@@ -264,13 +251,9 @@ class TestRenderPng:
 
    def test_render_png_single_drone(self, minimal_render_kwargs):
       """Test render_png with single drone."""
-      minimal_render_kwargs["drone_positions"] = [np.array([5.0, 5.0, 5.0])]
-      minimal_render_kwargs["drone_radii"] = [0.2]
-      minimal_render_kwargs["drone_safety_zones"] = [1.0]
-      minimal_render_kwargs["drone_colors"] = ["blue"]
-      minimal_render_kwargs["safety_colors"] = ["cyan"]
-      minimal_render_kwargs["trace_colors"] = ["blue"]
-      minimal_render_kwargs["drone_traces"] = [[]]
+      minimal_render_kwargs["drones"] = [Drone(drone_id=f"drone-1", radius=0.2, safety_zone=1.0, x=np.array([5.0, 5.0, 5.0, 1.0, 1.0, 1.0]), color="blue", safety_color="cyan",
+                  trace_color="blue", cons_stop=0.0, controller=None, physics=None, route=None)]
+      minimal_render_kwargs["drone_traces"] = {"drone-1": []}
 
       result = render_png(**minimal_render_kwargs)
 
@@ -279,13 +262,10 @@ class TestRenderPng:
    def test_render_png_many_drones(self, minimal_render_kwargs):
       """Test render_png with many drones."""
       n_drones = 20
-      minimal_render_kwargs["drone_positions"] = [np.array([float(i), float(i % 10), 5.0]) for i in range(n_drones)]
-      minimal_render_kwargs["drone_radii"] = [0.2] * n_drones
-      minimal_render_kwargs["drone_safety_zones"] = [1.0] * n_drones
-      minimal_render_kwargs["drone_colors"] = ["blue"] * n_drones
-      minimal_render_kwargs["safety_colors"] = ["cyan"] * n_drones
-      minimal_render_kwargs["trace_colors"] = ["blue"] * n_drones
-      minimal_render_kwargs["drone_traces"] = [[]] * n_drones
+      minimal_render_kwargs["drones"] = [Drone(drone_id=f"drone-{i}", radius=0.2, safety_zone=1.0, color="blue", safety_color="cyan", trace_color="blue",
+                                               x=np.array([float(i), float(i % 10), 5.0, 1.0, 1.0, 1.0]),
+                                               cons_stop=0.0, controller=None, physics=None, route=None) for i in range(n_drones)]
+      minimal_render_kwargs["drone_traces"] = {f"drone-{i}": [] for i in range(n_drones)}
 
       result = render_png(**minimal_render_kwargs)
 
@@ -320,13 +300,10 @@ class TestRenderPng:
 
    def test_render_png_rgb_tuple_colors(self, minimal_render_kwargs):
       """Test render_png with RGB tuple colors."""
-      minimal_render_kwargs["drone_positions"] = [np.array([5.0, 5.0, 5.0])]
-      minimal_render_kwargs["drone_radii"] = [0.2]
-      minimal_render_kwargs["drone_safety_zones"] = [1.0]
-      minimal_render_kwargs["drone_colors"] = [(0.5, 0.2, 0.8)]  # RGB tuple
-      minimal_render_kwargs["safety_colors"] = [(0.2, 0.8, 0.5)]
-      minimal_render_kwargs["trace_colors"] = [(0.8, 0.5, 0.2)]
-      minimal_render_kwargs["drone_traces"] = [[]]
+      minimal_render_kwargs["drones"] = [
+            Drone(drone_id=f"drone-1", radius=0.2, safety_zone=1.0, x=np.array([5.0, 5.0, 5.0, 1.0, 1.0, 1.0]), color=[(0.5, 0.2, 0.8)], safety_color=[(0.2, 0.8, 0.5)],
+                  trace_color=[(0.8, 0.5, 0.2)], cons_stop=0.0, controller=None, physics=None, route=None)]
+      minimal_render_kwargs["drone_traces"] = {"drone-1": []}
 
       result = render_png(**minimal_render_kwargs)
 
@@ -334,13 +311,10 @@ class TestRenderPng:
 
    def test_render_png_short_trace(self, minimal_render_kwargs):
       """Test render_png with trace shorter than 2 points (no arrow)."""
-      minimal_render_kwargs["drone_positions"] = [np.array([5.0, 5.0, 5.0])]
-      minimal_render_kwargs["drone_radii"] = [0.2]
-      minimal_render_kwargs["drone_safety_zones"] = [1.0]
-      minimal_render_kwargs["drone_colors"] = ["blue"]
-      minimal_render_kwargs["safety_colors"] = ["cyan"]
-      minimal_render_kwargs["trace_colors"] = ["blue"]
-      minimal_render_kwargs["drone_traces"] = [[np.array([5.0, 5.0, 5.0])]]  # Single point
+      minimal_render_kwargs["drones"] = [
+            Drone(drone_id=f"drone-1", radius=0.2, safety_zone=1.0, x=np.array([5.0, 5.0, 5.0, 1.0, 1.0, 1.0]), color="blue", safety_color="cyan",
+                  trace_color="blue", cons_stop=0.0, controller=None, physics=None, route=None)]
+      minimal_render_kwargs["drone_traces"] = {"drone-1": [np.array([5.0, 5.0, 5.0])]}
 
       result = render_png(**minimal_render_kwargs)
 
@@ -348,17 +322,10 @@ class TestRenderPng:
 
    def test_render_png_zero_length_trace_direction(self, minimal_render_kwargs):
       """Test render_png with trace where last two points are same (zero direction)."""
-      minimal_render_kwargs["drone_positions"] = [np.array([5.0, 5.0, 5.0])]
-      minimal_render_kwargs["drone_radii"] = [0.2]
-      minimal_render_kwargs["drone_safety_zones"] = [1.0]
-      minimal_render_kwargs["drone_colors"] = ["blue"]
-      minimal_render_kwargs["safety_colors"] = ["cyan"]
-      minimal_render_kwargs["trace_colors"] = ["blue"]
-      minimal_render_kwargs["drone_traces"] = [[
-         np.array([4.0, 4.0, 4.0]),
-         np.array([5.0, 5.0, 5.0]),
-         np.array([5.0, 5.0, 5.0])
-      ]]
+      minimal_render_kwargs["drones"] = [
+            Drone(drone_id=f"drone-1", radius=0.2, safety_zone=1.0, x=np.array([5.0, 5.0, 5.0, 1.0, 1.0, 1.0]), color="blue", safety_color="cyan",
+                  trace_color="blue", cons_stop=0.0, controller=None, physics=None, route=None)]
+      minimal_render_kwargs["drone_traces"] = {"drone-1": [[np.array([4.0, 4.0, 4.0]), np.array([5.0, 5.0, 5.0]), np.array([5.0, 5.0, 5.0])]]}
 
       result = render_png(**minimal_render_kwargs)
 
@@ -378,13 +345,12 @@ class TestRenderPng:
 
    def test_render_png_with_safety_alphas(self, minimal_render_kwargs):
       """Test render_png accepts and uses safety_alphas parameter."""
-      minimal_render_kwargs["drone_positions"] = [np.array([1.0, 1.0, 1.0]), np.array([5.0, 5.0, 5.0])]
-      minimal_render_kwargs["drone_radii"] = [0.2, 0.3]
-      minimal_render_kwargs["drone_safety_zones"] = [1.0, 1.5]
-      minimal_render_kwargs["drone_colors"] = ["tab:blue", "tab:orange"]
-      minimal_render_kwargs["safety_colors"] = ["tab:cyan", "tab:red"]
-      minimal_render_kwargs["trace_colors"] = ["blue", "orange"]
-      minimal_render_kwargs["drone_traces"] = [[], []]
+      minimal_render_kwargs["drones"] = [
+            Drone(drone_id=f"drone-1", radius=0.2, safety_zone=1.0, x=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]), color="tab:blue", safety_color="tab:cyan",
+                  trace_color="blue", cons_stop=0.0, controller=None, physics=None, route=None),
+            Drone(drone_id=f"drone-2", radius=0.3, safety_zone=1.5, x=np.array([5.0, 5.0, 5.0, 1.0, 1.0, 1.0]), color="tab:orange", safety_color="tab:red",
+                  trace_color="orange", cons_stop=0.0, controller=None, physics=None, route=None)]
+      minimal_render_kwargs["drone_traces"] = {"drone-1": []}
 
       result = render_png(**minimal_render_kwargs, safety_alphas=[0.3, 1.0])
 

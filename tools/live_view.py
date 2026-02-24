@@ -99,7 +99,7 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
                raise RuntimeError(f"Unsolvable configuration (central MPC infeasible at frame {i}, step {sim.step_count}). Detail: {detail}")
 
       # Prepare the same inputs that the /render handler would use.
-      traces = [[] if trace_len == 0 else sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones]
+      traces = {d.drone_id: sim.traces.get(d.drone_id, [])[-trace_len:] for d in sim.drones}
       safety_zones: list[float] = []
       safety_alphas: list[float] = []
       for d in sim.drones:
@@ -111,20 +111,18 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
           else:
               safety_alphas.append(0.8)
 
-      is_distributed = isinstance(sim.coordinator, DistributedMPCCoordinator)
+      is_distributed = isinstance(sim.coordinator, DistributedMPCCoordinator) # TODO check of another field!!
       neighbor_links = None # sim.coordinator.get_neighbor_pairs() if is_distributed else None
       admm_iteration_count = sim.coordinator.get_last_iteration_count() if is_distributed else None
       admm_converged = sim.coordinator.get_last_converged() if is_distributed else None
 
-      png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max,
-            drone_positions=[d.position() for d in sim.drones], drone_radii=[d.radius for d in sim.drones], drone_safety_zones=safety_zones,
-            drone_colors=[d.color for d in sim.drones], safety_colors=[d.safety_color for d in sim.drones], trace_colors=[d.trace_color for d in sim.drones],
-            drone_traces=traces, obstacles=sim.obstacles,
-            step_count=sim.step_count, compute_time_s=sim.compute_time_s,
-            neighbor_links=neighbor_links, admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
-            safety_alphas=safety_alphas,
-            width=width, height=height, dpi=dpi, elev=elev, azim=azim
-      )
+      png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max, drones=sim.drones,
+                             drone_traces=traces, obstacles=sim.obstacles,
+                             step_count=sim.step_count, compute_time_s=sim.compute_time_s,
+                             neighbor_links=neighbor_links, admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
+                             safety_alphas=safety_alphas,
+                             width=width, height=height, dpi=dpi, elev=elev, azim=azim
+                             )
 
       # For display
       img = mpimg.imread(io.BytesIO(png_bytes), format="png")

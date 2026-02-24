@@ -65,7 +65,7 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
    if trace_len < 0:
       raise HTTPException(status_code=422, detail="trace_len must be >= 0")
 
-   traces = [[] if trace_len == 0 else _sim.traces.get(d.drone_id, [])[-trace_len:] for d in _sim.drones]
+   traces = {d.drone_id: _sim.traces.get(d.drone_id, [])[-trace_len:] for i, d in enumerate(_sim.drones)}
 
    # Compute per-drone safety zone radius and wireframe alpha.
    # compute_adaptive_radius handles both adaptive (velocity-dependent) and fixed drones.
@@ -101,17 +101,9 @@ def render(width: int = 900, height: int = 700, dpi: int = 120, elev: float = 20
       admm_iteration_count = _sim.coordinator.get_last_iteration_count()
       admm_converged = _sim.coordinator.get_last_converged()
 
-   png = render_png(room_min=_sim.room_min, room_max=_sim.room_max, drone_positions=[d.position() for d in _sim.drones],
-                    drone_radii=[d.radius for d in _sim.drones], drone_safety_zones=safety_zones,
-                    drone_colors=[d.color for d in _sim.drones], safety_colors=[d.safety_color for d in _sim.drones],
-                    trace_colors=[d.trace_color for d in _sim.drones], drone_traces=traces, obstacles=_sim.obstacles,
-                    step_count=_sim.step_count, compute_time_s=_sim.compute_time_s,
-                    neighbor_links=neighbor_links,
-                    admm_iteration_count=admm_iteration_count,
-                    admm_converged=admm_converged,
-                    safety_alphas=safety_alphas,
-                    max_safety_zones=max_safety_zones,
-                    width=width, height=height, dpi=dpi,
-                    elev=elev, azim=azim)
+   png = render_png(room_min=_sim.room_min, room_max=_sim.room_max, drones=_sim.drones, drone_traces=traces, obstacles=_sim.obstacles,
+                    step_count=_sim.step_count, compute_time_s=_sim.compute_time_s, neighbor_links=neighbor_links,
+                    admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
+                    safety_alphas=safety_alphas, width=width, height=height, dpi=dpi, elev=elev, azim=azim)
 
    return Response(content=png, media_type="image/png")
