@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None):
          # run_scenario_1_1()
          pass
       case '1_2':
-         # with n_crit=13, v_max=2.0, u_max=2.5, alpha=0.3, lambda_vel=0.3:
+         # with n_crit=13, v_max=2.0, u_max=2.5, alpha=0.3, lambda_vel=1.0:
          # r_stop: 1.3474037423467855 -> r_min: 1.1674037423467856
          # n_pack_static: 9.773206780248147 -> n_pack_adaptive: 12.787666037083108
          run_scenario_1_2(result_path=args.result_path, n_threads=args.num_threads, v_max=args.v_max, u_max=args.u_max, horizon=args.horizon,

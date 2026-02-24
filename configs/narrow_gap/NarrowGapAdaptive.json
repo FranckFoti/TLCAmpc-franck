@@ -18,6 +18,7 @@
     "type": "mpc_agent_adaptive",
     "params": {
       "horizon": 4,
+      "lambda_vel": 1.0,
       "q_pos": [2.0, 2.0, 2.0],
       "q_vel": [1.0, 1.0, 1.0],
       "r_u": [0.5, 0.5, 0.5]

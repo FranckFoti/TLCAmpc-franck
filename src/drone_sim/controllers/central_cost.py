@@ -97,7 +97,7 @@ class AdaptiveMPCAgent(CentralMPCAgent):
    conflicts, naturally shrinking the safety zone.
    """
 
-   lambda_vel: float = 0.8
+   lambda_vel: float = 1.0
 
    def central_cost(self, u_seq: np.ndarray, drone: Drone) -> float:
       u_seq = np.asarray(u_seq, dtype=float).reshape((-1, 3))

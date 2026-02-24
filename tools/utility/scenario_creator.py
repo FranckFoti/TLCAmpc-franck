@@ -69,4 +69,4 @@ def create_controller(type:str="mpc_agent", horizon:int=4, q_pos:float=2.0, q_ve
    # @register_controller("mpc_agent_adaptive")
    # @dataclass
    # class AdaptiveMPCAgent(CentralMPCAgent):
-   #    lambda_vel: float = 0.8
+   #    lambda_vel: float = 1.0
