@@ -118,7 +118,7 @@ class LocalMPCSolver:
 
       # Check constraint satisfaction
       g = constraints(u_opt.flatten())
-      feasible = result.success and (len(g) == 0 or g.min() >= -1e-6)
+      feasible = result.success and (len(g) == 0 or g.min() >= -self.f_tol)
 
       # Infeasible fallback: decelerate, then hold position
       if not feasible:

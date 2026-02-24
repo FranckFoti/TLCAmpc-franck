@@ -274,7 +274,7 @@ class GlobalMPCSolver:
       min_margin = float(g.min(initial=np.inf)) if g.size else float("inf")
       if not np.isfinite(min_margin):
          raise RuntimeError("CentralMPCGlobalCoordinator produced non-finite constraint margins.")
-      if min_margin < -1e-6:
+      if min_margin < -self.f_tol:
          _log.warning("GlobalMPC: constraint violation detected (min margin=%.3e) — breakdown:", min_margin)
          self._log_constraint_breakdown(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
          raise RuntimeError(f"CentralMPCGlobalCoordinator produced infeasible controls: min constraint margin {min_margin:.3e} < 0.")
