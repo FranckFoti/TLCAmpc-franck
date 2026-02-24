@@ -12,6 +12,7 @@ class Status(StrEnum):
    MAX_STEPS = "max_steps"
    INFEASIBLE = "infeasible"
    ERROR = "error"
+   TIMEOUT = "timeout"
 
 def thread_unsafe_print_results(all_pair_dists: list[float], horizon: int, jerk_3d_value: float, num_drones: int, out_dir: Path, status: Status,
                                 step_durations: list[float], step_mean_pair_dists: list[float], wall_time: float, coordinator_type: str, controller_type: str) -> None:

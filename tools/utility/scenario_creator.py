@@ -10,7 +10,8 @@ def create_scenario(dt: float = 0.1, # simulation & coordinator
                     horizon: int = 4, controller_type: str = "mpc_agent", alpha: float | None = None, # controller TODO add params, be able to add more than one
                     coordinator_type: str = "dmpc_admm", # coordinator TODO add params
                     room_size: float = 5.0, # room TODO add sphere
-                    n_drones: int = 4, drones_radius: float = 0.2, safety_zone: float = 1.5 # drones TODO, be able to use different controllers and physics
+                    n_drones: int = 4, drones_radius: float = 0.2, safety_zone: float = 1.5, waypoints:list[list[list[float]]]|None=None, # drones TODO, be able to use different controllers and physics
+                    obstacles: list[dict[str, list[float]]]|None=None
                     ) -> ScenarioConfig:
    physics = create_physics(v_max=physics_v, u_max=physics_u)
    if controller_type == "mpc_agent":
@@ -29,11 +30,14 @@ def create_scenario(dt: float = 0.1, # simulation & coordinator
       raise ValueError("Unknown coordinator type: %s", coordinator_type)
 
    room = RoomConfig(min=[-room_size/2, -room_size/2, -room_size/2], max=[room_size/2, room_size/2, room_size/2])
-   waypoints = generate_positions(n_drones=n_drones, room_min=room.min, room_max=room.max, min_pair_distance=safety_zone*2, wall_margin=safety_zone)
+   if waypoints is None:
+      waypoints = generate_positions(n_drones=n_drones, room_min=room.min, room_max=room.max, min_pair_distance=safety_zone*2, wall_margin=safety_zone)
    drones = [DroneConfig(drone_id=f"drone-{i}", start=waypoints[i][0], target=waypoints[i][1], controller=controller, physics="default", alpha=alpha_set,
                          radius=drones_radius, safety_zone=safety_zone, cons_stop=0.0, drone_color=COLOR_BY_DRONE_INDEX[i + 1]) for i in range(n_drones)]
 
-   return build_scenario(physics=physics, controller=controller, coordinator=coordinator_spec, comm_radius=None, obstacles=[], room=room, drones=drones, dt=dt)
+   if obstacles is not None:
+      obstacles = [ObstacleConfig(center=obstacle["center"], half_extents=obstacle["half_extents"]) for obstacle in obstacles]
+   return build_scenario(physics=physics, controller=controller, coordinator=coordinator_spec, comm_radius=None, obstacles=obstacles, room=room, drones=drones, dt=dt)
 
 def build_scenario(physics: PhysicsSpec, controller: ControllerSpec, coordinator: ControllerSpec|None, room: RoomConfig, drones:list[DroneConfig], dt:float=0.1, comm_radius:float|None=None, obstacles:list[ObstacleConfig]|None=None) -> ScenarioConfig:
    return ScenarioConfig(dt=dt, physics=physics, controller=controller, coordinator=coordinator, room=room, drones=drones, comm_radius=comm_radius, obstacles=obstacles if obstacles is not None else [])

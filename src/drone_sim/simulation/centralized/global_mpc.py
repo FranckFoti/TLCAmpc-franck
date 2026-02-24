@@ -111,7 +111,7 @@ class GlobalMPCSolver:
                sj = _safety_radius(dj, _velocity_at_step(vj, step))
                dist = float(np.linalg.norm(pi[step] - pj[step]))
                margins[step] = dist - (si + sj + di.cons_stop + dj.cons_stop)
-            collision[f"{di.drone_id}↔{dj.drone_id}"] = margins
+            collision[f"{di.drone_id} <-> {dj.drone_id}"] = margins
 
       # Room: one (horizon*6,) array per drone (lower/upper per axis)
       room: dict[str, np.ndarray] = {}

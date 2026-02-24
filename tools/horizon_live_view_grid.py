@@ -69,7 +69,7 @@ tuple[int, int, str]:
       return (num_drones, horizon, f"exception: {e}")
 
 
-def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int) -> tuple[
+def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int, timeout: float | None = None) -> tuple[
    Status, float, float, list[float], list[float], list[float], list[Image.Image]]:
    """
    Run one (N, H) pair using direct simulator execution and returns all relevant information to create csv and gif
@@ -77,6 +77,7 @@ def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int
    :param scenario: ScenarioConfig object.
    :param max_steps: Maximum number of steps to run.
    :param trace_len: Number of previous positions to store per drone for 3D jerk metric.
+   :param timeout: Optional timeout in seconds. If exceeded, returns with Status.TIMEOUT.
    :return: status, wall_time, jerk_3d_value, step_durations, step_mean_pair_dists, all_pair_dists, frames
    """
    status = Status.RUNNING
@@ -173,6 +174,11 @@ def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int
       # Check if all drones reached destination
       if all_drones_reached_destination(sim.drones):
          status = Status.FINISHED
+         break
+
+      if timeout is not None and (time.perf_counter() - t0) >= timeout:
+         print(f"  Timeout reached after {timeout:.1f}s at step {step_idx}")
+         status = Status.TIMEOUT
          break
 
    else:
