@@ -118,7 +118,7 @@ def process_scenarios(scenarios: list[tuple[ScenarioConfig, int]], result_path: 
 
 
 def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: float, horizon: int, room_size: float, n_runs: int,
-                     n_crit: int, static_safety_zone: float, adaptive_safety_zone: float, r_min: float):
+                     alpha: float, n_crit: int, static_safety_zone: float, adaptive_safety_zone: float, r_min: float):
    csv_path = Path(__file__).parent / 'paper2_results' / result_path
    runs = range(n_runs)
 
@@ -136,7 +136,7 @@ def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: floa
                   try:
                      print(f'Building scenario run {i}: {n} drones, {coord}, {controller}, {safety_zone}')
                      cfg = tools.utility.scenario_creator.create_scenario(horizon=horizon, dt=_DT, controller_type=controller, coordinator_type=coord,
-                                                                          physics_u=u_max, physics_v=v_max, room_size=room_size, n_drones=n,
+                                                                          physics_u=u_max, physics_v=v_max, room_size=room_size, n_drones=n, alpha=alpha,
                                                                           drones_radius=r_min, safety_zone=safety_zone)
                      if cfg is not None:
                         scenarios.append((cfg, i))
@@ -171,8 +171,9 @@ def main(argv: list[str] | None = None):
          # with n_crit=13, v_max=2.0, u_max=2.5, alpha=0.3, lambda_vel=1.0:
          # r_stop: 1.3474037423467855 -> r_min: 1.1674037423467856
          # n_pack_static: 9.773206780248147 -> n_pack_adaptive: 12.787666037083108
+         # v_max=3.0, u_max=2.5, alpha=0.67, r_min=0.4 -> r_max = 1.6
          run_scenario_1_2(result_path=args.result_path, n_threads=args.num_threads, v_max=args.v_max, u_max=args.u_max, horizon=args.horizon,
-                          room_size=args.room_size, n_runs=args.runs, n_crit=args.n_crit,
+                          room_size=args.room_size, n_runs=args.runs, n_crit=args.n_crit, alpha=1.5,
                           static_safety_zone=args.static_safety_zone, adaptive_safety_zone=args.adaptive_safety_zone, r_min=args.r_min)
          plot_scenario_1_2(args.result_path)
       case '1_3':
