@@ -15,13 +15,12 @@ Standard physics defaults (used unless a scenario overrides them):
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
 from pathlib import Path
 import logging
 import csv
-import threading
 import argparse
+
+from joblib import Parallel, delayed
 
 import tools.utility.scenario_creator
 from drone_sim.domain.config import ScenarioConfig
@@ -38,8 +37,8 @@ CONTROLLERS = ['mpc_agent', 'mpc_agent_adaptive']
 _HORIZON: int = 4
 _DT: float = 0.1
 
-# Lock for thread-safe CSV writing
-_csv_lock = threading.Lock()
+# Lock for thread-safe CSV writing (filelock for multiprocessing)
+import filelock
 
 
 def _print_results(all_pair_dists: list[float], horizon: int, jerk_3d_value: float, num_drones: int, out_dir: Path, status: Status, step_durations: list[float],
@@ -52,7 +51,8 @@ def _print_results(all_pair_dists: list[float], horizon: int, jerk_3d_value: flo
    csv_path = out_dir / 'metrics.csv'
 
    out_dir.mkdir(parents=True, exist_ok=True)
-   with _csv_lock:
+   lock_path = csv_path.with_suffix('.csv.lock')
+   with filelock.FileLock(lock_path):
       write_header = not csv_path.exists()
       with csv_path.open('a', newline='', encoding='utf-8') as f:
          writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -97,25 +97,24 @@ def _run_scenario_wrapper(scenario: ScenarioConfig, out_dir: Path, max_steps: in
       return num_drones, horizon, f'exception: {e}'
 
 
-def process_scenarios(scenarios: list[tuple[ScenarioConfig, int]], result_path: Path, num_threads: int, should_print_gif: bool = False):
-   completed = 0
+def process_scenarios(scenarios: list[tuple[ScenarioConfig, int]], result_path: Path, n_jobs: int, should_print_gif: bool = False):
    total_scenarios = len(scenarios)
-   # coord_type = 'mpc_central' # 'dmpc_admm'
+   print(f'Processing {total_scenarios} scenarios with {n_jobs} jobs...')
 
-   with ThreadPoolExecutor(max_workers=num_threads) as executor:
-      futures = {
-            executor.submit(_run_scenario_wrapper, scenario=scenario, out_dir=Path(result_path), max_steps=5000, trace_len=5000, timeout=600, should_print_gif=should_print_gif):
-               (scenario, i) for scenario, i in scenarios
-            }
+   results = Parallel(n_jobs=n_jobs, verbose=10)(
+      delayed(_run_scenario_wrapper)(
+         scenario=scenario,
+         out_dir=Path(result_path),
+         max_steps=5000,
+         trace_len=5000,
+         timeout=600,
+         should_print_gif=should_print_gif
+      )
+      for scenario, i in scenarios
+   )
 
-      for future in as_completed(futures):
-         scenario, i = futures[future]
-         completed += 1
-         try:
-            result_n, result_h, status = future.result()
-            print(f'[{completed}/{total_scenarios}] Completed N={result_n}, H={result_h}: {status}')
-         except Exception as e:
-            print(f'[{completed}/{total_scenarios}] Failed N={len(scenario.drones)}, run={i}: {e}')
+   for idx, (result_n, result_h, status) in enumerate(results, 1):
+      print(f'[{idx}/{total_scenarios}] Completed N={result_n}, H={result_h}: {status}')
 
 
 def run_scenario_1_3(result_path: str, room_size: float, v_max: float, u_max: float, alpha: float, static_safety_zone: float, adaptive_safety_zone: float, r_min: float):
@@ -140,7 +139,7 @@ def run_scenario_1_3(result_path: str, room_size: float, v_max: float, u_max: fl
                                                               safety_zone=adaptive_safety_zone if controller == 'mpc_agent_adaptive' else static_safety_zone)
          scenarios.append((cfg, 1))
 
-   process_scenarios(scenarios=scenarios, result_path=csv_path, num_threads=1, should_print_gif=True)
+   process_scenarios(scenarios=scenarios, result_path=csv_path, n_jobs=1, should_print_gif=True)
 
 
 def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: float, horizon: int, room_size: float, n_runs: int, alpha: float, n_crit: int,
@@ -169,14 +168,14 @@ def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: floa
                except Exception as e:
                   print(f'Building scenario run {i}/{sum_runs}: {n} drones, {coord}, {controller}, '
                         f'{adaptive_safety_zone if controller == 'mpc_agent_adaptive' else static_safety_zone}: {e}')
-   process_scenarios(scenarios, csv_path, n_threads, should_print_gif=False)
+   process_scenarios(scenarios=scenarios, result_path=csv_path, n_jobs=-1, should_print_gif=False)
 
 
 def main(argv: list[str] | None = None):
    parser = argparse.ArgumentParser(description='Run testscenarios')
 
    parser.add_argument('--result_path', type=Path, default=Path('results_8_4'), help='Path to the result directory (relative to this <script>/paper2_results/)')
-   parser.add_argument('--num_threads', type=int, default=1, help='Number of threads to use')
+   parser.add_argument('--num_jobs', type=int, default=-1, help='Number of cpus to use (-1 for all)')
    parser.add_argument('--runs', type=int, default=10, help='Number of runs')
    parser.add_argument('--scenario', required=True, type=str, choices=['1_1', '1_2', '1_3', '2_1', '2_2', '2_3', '2_4'], help='Scenario to run')
    parser.add_argument('--horizon', type=int, default=4, help='Mpc Horizon')
@@ -198,8 +197,8 @@ def main(argv: list[str] | None = None):
          # run_scenario_1_1()
          pass
       case '1_2':
-         # python -m paper2_tools.scenarios --scenario 1_2 --num_threads 1 --runs 9 --result_path results_s_1_2 --n_crit 11 --u_max 3.0 --v_max 2.5 --static_safety_zone 1.52 --adaptive_safety_zone 1.0 --room_size 8.0 --log-level INFO v_max=2.5, u_max=3.0, alpha=0.5, adaptive safety_zone=1.0; static safety_zone=1.52 -> n_crit=11
-         run_scenario_1_2(result_path=args.result_path, n_threads=args.num_threads, v_max=args.v_max, u_max=args.u_max, horizon=args.horizon,
+         # python -m paper2_tools.scenarios --scenario 1_2 --num_jobs -1 --runs 9 --result_path results_s_1_2 --n_crit 11 --u_max 3.0 --v_max 2.5 --static_safety_zone 1.52 --adaptive_safety_zone 1.0 --room_size 8.0 --log-level INFO v_max=2.5, u_max=3.0, alpha=0.5, adaptive safety_zone=1.0; static safety_zone=1.52 -> n_crit=11
+         run_scenario_1_2(result_path=args.result_path, n_threads=args.num_jobs, v_max=args.v_max, u_max=args.u_max, horizon=args.horizon,
                           room_size=args.room_size, n_runs=args.runs, n_crit=args.n_crit, alpha=1.5, static_safety_zone=args.static_safety_zone,
                           adaptive_safety_zone=args.adaptive_safety_zone, r_min=args.r_min)
          plot_scenario_1_2(args.result_path)
