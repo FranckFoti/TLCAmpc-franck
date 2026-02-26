@@ -19,6 +19,8 @@ from pathlib import Path
 import logging
 import csv
 import argparse
+import gc
+import numpy as np
 
 from joblib import Parallel, delayed
 
@@ -61,16 +63,12 @@ def _print_results(all_pair_dists: list[float], horizon: int, jerk_3d_value: flo
          writer.writerow(row)
 
 
-def _run_scenario_wrapper_and_print(num_drones: int, horizon: int, cfg: ScenarioConfig, max_steps: int, trace_len: int, out_dir: Path) -> tuple[int, int, str]:
-   """Wrapper for thread pool execution. Returns (num_drones, horizon, status) for progress tracking."""
-   try:
-      status, wall_time, jerk_3d_value, step_durations, step_mean_pair_dists, all_pair_dists, frames = run_single_scenario(cfg, max_steps, trace_len)
-      _print_results(all_pair_dists=all_pair_dists, horizon=horizon, jerk_3d_value=jerk_3d_value, num_drones=num_drones, out_dir=out_dir, status=status,
-                     step_durations=step_durations, step_mean_pair_dists=step_mean_pair_dists, wall_time=wall_time, coordinator_type=cfg.coordinator.type,
-                     controller_type=cfg.controller.type)
-      return (num_drones, horizon, 'ok')
-   except Exception as e:
-      return (num_drones, horizon, f'exception: {e}')
+def _safe_gif(out_dir: Path, num_drones: int, frames: list[np.ndarray], status: Status, wall_time: float, scenario: ScenarioConfig):
+   out_dir.mkdir(parents=True, exist_ok=True)
+   coord_suffix = "dmpc" if scenario.coordinator.type == "dmpc_admm" else "central"
+   gif_path = out_dir / f"blocked_N{num_drones}_{coord_suffix}.gif"
+   print(f"status={status}, frames={len(frames)}, wall_time={wall_time:.2f}s -> GIF: {gif_path}")
+   print_gif(frames=frames, gif_path=gif_path, gif_fps=20.0)
 
 
 def _run_scenario_wrapper(scenario: ScenarioConfig, out_dir: Path, max_steps: int, trace_len: int, timeout: int, should_print_gif: bool = False) -> tuple[int, int, str]:
@@ -81,20 +79,20 @@ def _run_scenario_wrapper(scenario: ScenarioConfig, out_dir: Path, max_steps: in
       print(f'  Starting {num_drones} drones ({scenario.controller.type}, {scenario.coordinator.type})')
       status, wall_time, jerk_3d_value, step_durations, step_mean_pair_dists, all_pair_dists, frames = run_single_scenario(
             scenario=scenario, max_steps=max_steps, trace_len=trace_len, timeout=timeout)
+
       _print_results(all_pair_dists=all_pair_dists, horizon=horizon, jerk_3d_value=jerk_3d_value, num_drones=num_drones, out_dir=out_dir, status=status,
                      step_durations=step_durations, step_mean_pair_dists=step_mean_pair_dists, wall_time=wall_time, coordinator_type=scenario.coordinator.type,
                      controller_type=scenario.controller.type)
+
       if should_print_gif:
-         out_dir.mkdir(parents=True, exist_ok=True)
-         coord_suffix = "dmpc" if scenario.coordinator.type == "dmpc_admm" else "central"
-         gif_path = out_dir / f"blocked_N{num_drones}_{coord_suffix}.gif"
-         print(f"status={status}, frames={len(frames)}, wall_time={wall_time:.2f}s -> GIF: {gif_path}")
-         print_gif(frames=frames, gif_path=gif_path, gif_fps=20.0)
+         _safe_gif(out_dir, num_drones, frames, status, wall_time, scenario)
 
       print(f'  Completed {num_drones} drones ({scenario.controller.type}, {scenario.coordinator.type})')
       return num_drones, horizon, 'ok'
    except Exception as e:
       return num_drones, horizon, f'exception: {e}'
+   finally:
+      gc.collect()
 
 
 def process_scenarios(scenarios: list[tuple[ScenarioConfig, int]], result_path: Path, n_jobs: int, should_print_gif: bool = False):
