@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import numpy as np
 
 import pytest
 
@@ -81,8 +82,8 @@ def test_load_config_coordinator_type_is_string(config_file: Path) -> None:
 def test_load_config_room_bounds_are_lists(config_file: Path) -> None:
     backend = DirectBackend()
     state = backend.load_config(config_file)
-    assert isinstance(state.room_min, list)
-    assert isinstance(state.room_max, list)
+    assert isinstance(state.room_min, np.ndarray)
+    assert isinstance(state.room_max, np.ndarray)
     assert len(state.room_min) == 3
     assert len(state.room_max) == 3
 
@@ -109,17 +110,17 @@ def test_step_drone_state_types(loaded_backend: DirectBackend) -> None:
     d = result.drones[0]
     assert isinstance(d, DroneState)
     assert isinstance(d.drone_id, str)
-    assert isinstance(d.position, list)
-    assert isinstance(d.velocity, list)
+    assert isinstance(d.position, np.ndarray)
+    assert isinstance(d.velocity, np.ndarray)
     assert len(d.position) == 3
     assert len(d.velocity) == 3
 
 
-def test_step_position_values_are_floats(loaded_backend: DirectBackend) -> None:
+def test_step_position_values_are_numpy(loaded_backend: DirectBackend) -> None:
     result = loaded_backend.step()
     d = result.drones[0]
-    assert all(isinstance(v, float) for v in d.position), "position must be list[float], not numpy"
-    assert all(isinstance(v, float) for v in d.velocity), "velocity must be list[float], not numpy"
+    assert all(isinstance(v, (float, np.floating)) for v in d.position), "position elements must be float"
+    assert all(isinstance(v, (float, np.floating)) for v in d.velocity), "velocity elements must be float"
 
 
 def test_step_safety_radii_length(loaded_backend: DirectBackend) -> None:
@@ -226,10 +227,11 @@ def test_config_path_none_before_load() -> None:
     s = SimState(
         drone_count=0,
         obstacle_count=0,
+        obstacles=[],
         coordinator_type="none",
         dt=0.1,
         step_count=0,
-        room_min=[0.0, 0.0, 0.0],
-        room_max=[1.0, 1.0, 1.0],
+        room_min=np.zeros(3),
+        room_max=np.ones(3)
     )
     assert s.config_path is None

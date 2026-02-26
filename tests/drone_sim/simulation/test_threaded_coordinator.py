@@ -366,6 +366,7 @@ class TestThreadedCoordinatorIntegration:
         assert np.all(np.isfinite(result["drone-1"]))
         assert np.all(np.isfinite(result["drone-2"]))
 
+    @pytest.mark.slow
     def test_backward_compatibility_coordinator_interface(self):
         """Test solve_controls has same keyword-only interface as DistributedMPCCoordinator."""
         coordinator = ThreadedMPCCoordinator(

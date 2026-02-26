@@ -146,11 +146,26 @@ def plot_mean_step_time_boxplot(df: pd.DataFrame, output_dir: Path) -> None:
          filename_base="scenario_1_2_mean_step_time", figsize=(10, 5))
 
 
+def plot_mean_step_time_boxplot_by_coordinator(df: pd.DataFrame, output_dir: Path) -> None:
+   """Box-whisker plot: mean step time (s) for finished runs, separated by coordinator type."""
+   for coord in COORDINATOR_TYPES:
+      df_coord = df[df[COORDINATOR_TYPE_FIELD] == coord]
+      coord_label = "Central MPC" if coord == "mpc_central" else "DMPC-ADMM"
+      _plot_boxplot(
+         df_coord, output_dir,
+         column="mean_step_time_s",
+         ylabel="Mean Step Time [s]",
+         title=f"Scenario 1.2 – Mean Step Time ({coord_label}): Adaptive vs. Static Radius",
+         filename_base=f"scenario_1_2_mean_step_time_{coord}",
+         figsize=(10, 5)
+      )
+
+
 def main(metrics_csv: Path|None = None) -> None:
-   METRICS_CSV = Path(__file__).resolve().parent / "paper2_results" / "result_8_3" / "metrics.csv" \
+   METRICS_CSV = Path(__file__).resolve().parent / "paper2_results" / "results_senario_1" / "metrics.csv" \
       if metrics_csv is None \
       else Path(__file__).resolve().parent / "paper2_results" / metrics_csv / "metrics.csv"
-   OUTPUT_DIR = Path(__file__).resolve().parent / "paper2_results" / "result_8_3" / "plots"  \
+   OUTPUT_DIR = Path(__file__).resolve().parent / "paper2_results" / "results_senario_1" / "plots"  \
       if metrics_csv is None \
       else Path(__file__).resolve().parent / "paper2_results" / metrics_csv / "plots"
 
@@ -166,6 +181,7 @@ def main(metrics_csv: Path|None = None) -> None:
    plot_deadlock_rate(df, OUTPUT_DIR)
    plot_arrival_time_boxplot(df, OUTPUT_DIR)
    plot_mean_step_time_boxplot(df, OUTPUT_DIR)
+   plot_mean_step_time_boxplot_by_coordinator(df, OUTPUT_DIR)
 
    print("\nDone.")
 

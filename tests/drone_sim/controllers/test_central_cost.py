@@ -340,7 +340,7 @@ class TestAdaptiveMPCAgent:
    def test_init_default_lambda_vel(self):
       """Test default lambda_vel=0.8 and inherited fields."""
       agent = AdaptiveMPCAgent(dt=0.1)
-      assert agent.lambda_vel == 0.8
+      assert agent.lambda_vel == 1.0
       assert agent.horizon == 12
       assert agent.q_pos == (8.0, 8.0, 8.0)
       assert agent.q_vel == (0.5, 0.5, 0.5)

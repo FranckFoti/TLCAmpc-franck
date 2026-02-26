@@ -66,7 +66,8 @@ def _print_results(all_pair_dists: list[float], horizon: int, jerk_3d_value: flo
 def _safe_gif(out_dir: Path, num_drones: int, frames: list[np.ndarray], status: Status, wall_time: float, scenario: ScenarioConfig):
    out_dir.mkdir(parents=True, exist_ok=True)
    coord_suffix = "dmpc" if scenario.coordinator.type == "dmpc_admm" else "central"
-   gif_path = out_dir / f"blocked_N{num_drones}_{coord_suffix}.gif"
+   contr_suffix = "static" if scenario.controller.type == "mpc_agent" else "adaptive"
+   gif_path = out_dir / f"blocked_N{num_drones}_{coord_suffix}_{contr_suffix}.gif"
    print(f"status={status}, frames={len(frames)}, wall_time={wall_time:.2f}s -> GIF: {gif_path}")
    print_gif(frames=frames, gif_path=gif_path, gif_fps=20.0)
 

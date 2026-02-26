@@ -12,7 +12,8 @@ import pytest
 import numpy as np
 from unittest.mock import MagicMock
 
-from drone_sim.api.render import render_png, _draw_room_wireframe, _draw_sphere_wireframe, _draw_box_wireframe
+from drone_sim.api.render import render_png, draw_room_wireframe, draw_sphere_wireframe
+from drone_sim.api.utils.render_helper import draw_box_wireframe
 from drone_sim.domain.drone import Drone
 
 class TestDrawRoomWireframe:
@@ -24,7 +25,7 @@ class TestDrawRoomWireframe:
       room_min = np.array([0.0, 0.0, 0.0])
       room_max = np.array([10.0, 10.0, 10.0])
 
-      _draw_room_wireframe(ax, room_min, room_max)
+      draw_room_wireframe(ax, room_min, room_max)
 
       # Should draw 12 edges
       assert ax.plot.call_count == 12
@@ -35,7 +36,7 @@ class TestDrawRoomWireframe:
       room_min = np.array([1.0, 2.0, 3.0])
       room_max = np.array([4.0, 5.0, 6.0])
 
-      _draw_room_wireframe(ax, room_min, room_max)
+      draw_room_wireframe(ax, room_min, room_max)
 
       # Check that plot was called with coordinates
       assert ax.plot.called
@@ -60,7 +61,7 @@ class TestDrawRoomWireframe:
       room_max = np.array([5.0, 5.0, 5.0])
 
       # Should not raise
-      _draw_room_wireframe(ax, room_min, room_max)
+      draw_room_wireframe(ax, room_min, room_max)
 
       assert ax.plot.call_count == 12
 
@@ -73,7 +74,7 @@ class TestDrawSphereWireframe:
       ax = MagicMock()
       center = np.array([0.0, 0.0, 0.0])
 
-      _draw_sphere_wireframe(ax, center, radius=1.0, color="blue", alpha=0.5, lw=1.0)
+      draw_sphere_wireframe(ax, center, radius=1.0, color="blue", alpha=0.5, lw=1.0)
 
       assert ax.plot_wireframe.called
 
@@ -83,7 +84,7 @@ class TestDrawSphereWireframe:
       center = np.array([5.0, 5.0, 5.0])
       radius = 2.0
 
-      _draw_sphere_wireframe(ax, center, radius=radius, color="red", alpha=0.8, lw=0.5)
+      draw_sphere_wireframe(ax, center, radius=radius, color="red", alpha=0.8, lw=0.5)
 
       # Get the call arguments
       call_args = ax.plot_wireframe.call_args
@@ -99,7 +100,7 @@ class TestDrawSphereWireframe:
       ax = MagicMock()
       center = np.array([0.0, 0.0, 0.0])
 
-      _draw_sphere_wireframe(ax, center, radius=1.0, color="green", alpha=0.5, lw=1.0, resolution=10)
+      draw_sphere_wireframe(ax, center, radius=1.0, color="green", alpha=0.5, lw=1.0, resolution=10)
 
       # Get the call arguments
       call_args = ax.plot_wireframe.call_args
@@ -114,7 +115,7 @@ class TestDrawSphereWireframe:
       center = np.array([0.0, 0.0, 0.0])
 
       # Should not raise
-      _draw_sphere_wireframe(ax, center, radius=0.0, color="blue", alpha=0.5, lw=1.0)
+      draw_sphere_wireframe(ax, center, radius=0.0, color="blue", alpha=0.5, lw=1.0)
 
       assert ax.plot_wireframe.called
 
@@ -128,7 +129,7 @@ class TestDrawBoxWireframe:
       center = np.array([0.0, 0.0, 0.0])
       half_extents = np.array([1.0, 1.0, 1.0])
 
-      _draw_box_wireframe(ax, center, half_extents, color="tab:red", alpha=0.7, lw=1.2)
+      draw_box_wireframe(ax, center, half_extents, color="tab:red", alpha=0.7, lw=1.2)
 
       assert ax.plot.call_count == 12
 
@@ -138,7 +139,7 @@ class TestDrawBoxWireframe:
       center = np.array([1.0, 2.0, 3.0])
       half_extents = np.array([2.0, 0.5, 0.1])
 
-      _draw_box_wireframe(ax, center, half_extents, color="red", alpha=0.5, lw=1.0)
+      draw_box_wireframe(ax, center, half_extents, color="red", alpha=0.5, lw=1.0)
 
       assert ax.plot.call_count == 12
 

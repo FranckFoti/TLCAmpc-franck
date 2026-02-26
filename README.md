@@ -81,7 +81,23 @@ All paper scenarios are defined in `configs/basic_paper/*.json` and follow the p
 
 ## 3. REST API and Live Visualization
 
-### 3.1 Starting the REST Server
+### 3.1 Run the GUI
+
+If you only want to see an already existing Scenario, you can run the GUI:
+
+```bash
+python -m drone_sim.gui
+```
+<p align="center">
+  <img src="./figures/main_window.png" width="400" height="300" alt="2 Main Window" style="margin-right: 10px;">
+</p>
+In the main window, select the `load config` Button and choose a json configuration file.
+Next start the scenario by clicking the `start` button.
+With the `pause` button or space bar you can pause the simulation.
+With the `reset` button or space bar you can reset the simulation.
+Zoom in or out with the mouse wheel, or flip the camera with the mouse by holding the left mouse button and moving the mouse.
+
+### 3.2 Starting the REST Server
 
 From the repository root:
 
@@ -91,7 +107,7 @@ uvicorn drone_sim.api.app:app --reload
 
 The server will listen on `http://127.0.0.1:8000`.
 
-### 3.2 Loading Scenarios and Stepping the Simulation via REST
+### 3.3 Loading Scenarios and Stepping the Simulation via REST
 
 Example using the paper configuration `2DronesHorizon2.json`:
 
@@ -104,7 +120,7 @@ curl -s -X POST "http://127.0.0.1:8000/step?n=10"
 curl -s http://127.0.0.1:8000/state
 ```
 
-### 3.3 Live View and GIF Generation
+### 3.4 Live View and GIF Generation
 
 In a **second terminal** (with the server already running):
 
