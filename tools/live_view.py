@@ -20,7 +20,7 @@ from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
 from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
 from tools.utility.scenario_creator import create_scenario
-from tools.utility.helper import all_drones_reached_destination
+from drone_sim.domain.utils.helper import all_drones_reached_destination
 
 
 def load_parametrized_json(path: str | Path, params: dict[str, str] | None = None) -> dict[str, Any]:

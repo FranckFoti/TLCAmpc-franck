@@ -15,10 +15,6 @@ def pairwise_distances(positions: list[np.ndarray]) -> np.ndarray:
          dists.append(float(np.linalg.norm(pi - pj)))
    return np.asarray(dists, dtype=float)
 
-def all_drones_reached_destination(drones: list[Drone]) -> bool:
-   reached = [drone.route.target_reached(position=drone.position(), thresh=0.1) for drone in drones]
-   return all(reached)
-
 def piecewise_linear_loss_3d(points, penalty=1.0, eps_step=1e-6, angle_threshold_deg=90.0):
    """
    Piecewise-linear fit of a 3D trajectory with penalties for direction turnarounds.

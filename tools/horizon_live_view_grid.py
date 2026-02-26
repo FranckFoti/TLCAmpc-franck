@@ -14,8 +14,9 @@ from PIL import Image
 from drone_sim.api.render import render_png
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
+from drone_sim.domain.utils.helper import all_drones_reached_destination
 from tools.utility.constants import AZIM, DPI, ELEV, GIF_HEIGHT, GIF_WIDTH
-from tools.utility.helper import all_drones_reached_destination, pairwise_distances, piecewise_linear_loss_3d
+from tools.utility.helper import pairwise_distances, piecewise_linear_loss_3d
 from tools.utility.printer import print_gif, print_results_prep, Status
 from tools.utility.scenario_creator import create_scenario
 
