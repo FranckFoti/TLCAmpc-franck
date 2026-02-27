@@ -21,7 +21,7 @@ def draw_room_wireframe(ax: object, room_min: np.ndarray, room_max: np.ndarray) 
       ax.plot([xa, xb], [ya, yb], [za, zb], color="black", linewidth=1.0, alpha=0.4)
 
 
-def draw_sphere_wireframe(ax: object, center: np.ndarray, radius: float, *, color: str, alpha: float, lw: float, resolution: int = 18) -> None:
+def draw_sphere_wireframe(ax: object, center: np.ndarray, radius: float, *, color: str, alpha: float, lw: float, resolution: int = 24) -> None:
    """Draw a simple sphere wireframe."""
 
    u = np.linspace(0.0, 2.0 * np.pi, resolution)
@@ -84,14 +84,57 @@ def draw_neighbor_links(ax: object, neighbor_links: list[tuple[int, int]], drone
             ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]], color="gray", linewidth=0.8, alpha=0.5, linestyle="--")
 
 
+def _draw_box_faces(ax: object, center: np.ndarray, half_extents: np.ndarray, *, color: str, alpha: float) -> None:
+   """Draw the 6 faces of an axis-aligned box as semi-transparent surfaces."""
+   cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
+   hx, hy, hz = float(half_extents[0]), float(half_extents[1]), float(half_extents[2])
+   x0, x1 = cx - hx, cx + hx
+   y0, y1 = cy - hy, cy + hy
+   z0, z1 = cz - hz, cz + hz
+
+   # Each face is a 2x2 grid for plot_surface
+   # Bottom face (z = z0)
+   X = np.array([[x0, x1], [x0, x1]])
+   Y = np.array([[y0, y0], [y1, y1]])
+   Z = np.array([[z0, z0], [z0, z0]])
+   ax.plot_surface(X, Y, Z, color=color, alpha=alpha, shade=False)
+
+   # Top face (z = z1)
+   Z = np.array([[z1, z1], [z1, z1]])
+   ax.plot_surface(X, Y, Z, color=color, alpha=alpha, shade=False)
+
+   # Front face (y = y0)
+   X = np.array([[x0, x1], [x0, x1]])
+   Y = np.array([[y0, y0], [y0, y0]])
+   Z = np.array([[z0, z0], [z1, z1]])
+   ax.plot_surface(X, Y, Z, color=color, alpha=alpha, shade=False)
+
+   # Back face (y = y1)
+   Y = np.array([[y1, y1], [y1, y1]])
+   ax.plot_surface(X, Y, Z, color=color, alpha=alpha, shade=False)
+
+   # Left face (x = x0)
+   X = np.array([[x0, x0], [x0, x0]])
+   Y = np.array([[y0, y1], [y0, y1]])
+   Z = np.array([[z0, z0], [z1, z1]])
+   ax.plot_surface(X, Y, Z, color=color, alpha=alpha, shade=False)
+
+   # Right face (x = x1)
+   X = np.array([[x1, x1], [x1, x1]])
+   ax.plot_surface(X, Y, Z, color=color, alpha=alpha, shade=False)
+
+
 def draw_obstacles(ax: object, obstacles: list[tuple[np.ndarray, np.ndarray]]):
-   # Obstacles — draw as 3D wireframe cuboids
+   # Obstacles — draw as 3D filled cuboids with wireframe edges
    if obstacles:
       for i, (c, he) in enumerate(obstacles):
          center_arr = np.asarray(c, dtype=float).reshape(3)
          he_arr = np.asarray(he, dtype=float).reshape(3)
          label = "obstacles" if i == 0 else None
-         draw_box_wireframe(ax, center_arr, he_arr, color="tab:red", alpha=0.7, lw=1.2)
+         # Draw semi-transparent filled faces
+         _draw_box_faces(ax, center_arr, he_arr, color="tab:red", alpha=0.1)
+         # Draw wireframe edges on top
+         draw_box_wireframe(ax, center_arr, he_arr, color="tab:red", alpha=0.6, lw=1.5)
          if label:
             # Invisible scatter point to register the legend entry
             ax.scatter([float(center_arr[0])], [float(center_arr[1])], [float(center_arr[2])], s=1, c="tab:red", alpha=0.0, label=label)

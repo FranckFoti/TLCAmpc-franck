@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def _on_open_file(self) -> None:
-        path_str, _ = QFileDialog.getOpenFileName(self, "Open Scenario JSON", "", "JSON Files (*.json)")
+        path_str, _ = QFileDialog.getOpenFileName(self, "Open Scenario JSON", "configs", "JSON Files (*.json)")
         if not path_str:
             return
         self._backend.load_config(Path(path_str))
@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
             safety_color = drone.safety_color
 
             self._ax.scatter([pos[0]], [pos[1]], [pos[2]], s=80, c=[color] if isinstance(color, str) else [color], depthshade=True, label=drone.drone_id)
-            draw_sphere_wireframe(self._ax, pos, safety_r, color=safety_color, alpha=0.3, lw=0.6)
+            draw_sphere_wireframe(self._ax, pos, safety_r, color=safety_color, alpha=0.6, lw=0.6)
 
             trace = self._traces.get(drone.drone_id, [])
             if trace:
