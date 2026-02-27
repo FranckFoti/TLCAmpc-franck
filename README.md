@@ -38,7 +38,7 @@ All paper experiments use the same centralized MPC architecture:
 
 
 <p align="center">
-  <img src="figures/2DronesHorizon2.gif" width="250" height="250" alt="2 Drones small horizon" style="margin-right: 10px;">
+  <img src="doc/figures/2DronesHorizon2.gif" width="250" height="250" alt="2 Drones small horizon" style="margin-right: 10px;">
 </p>
 
 <details>
@@ -89,7 +89,7 @@ If you only want to see an already existing Scenario, you can run the GUI:
 python -m drone_sim.gui
 ```
 <p align="center">
-  <img src="./figures/main_window.png" width="400" height="300" alt="2 Main Window" style="margin-right: 10px;">
+  <img src="doc/figures/main_window.png" width="400" height="300" alt="2 Main Window" style="margin-right: 10px;">
 </p>
 In the main window, select the `load config` Button and choose a json configuration file.
 Next start the scenario by clicking the `start` button.
@@ -135,13 +135,13 @@ python -m tools.live_view \
 
 The results for the given json configuration are those:
 <p align="center">
-  <img src="figures/4DronesHorizon1.gif" width="250" height="250" alt="4 Drones Horizon 1" style="margin-right: 10px;">
-  <img src="figures/4DronesHorizon2.gif" width="250" height="250" alt="4 Drones Horizon 2" style="margin-right: 10px;">
+  <img src="doc/figures/4DronesHorizon1.gif" width="250" height="250" alt="4 Drones Horizon 1" style="margin-right: 10px;">
+  <img src="doc/figures/4DronesHorizon2.gif" width="250" height="250" alt="4 Drones Horizon 2" style="margin-right: 10px;">
 </p>
 
 <p align="center">
-  <img src="figures/6DronesHorizon4.gif" width="250" height="250" alt="6 Drones Horizon 4" style="margin-right: 10px;">
-  <img src="figures/6DronesHorizon10.gif" width="250" height="250" alt="6 Drones Horizon 10" style="margin-right: 10px;">
+  <img src="doc/figures/6DronesHorizon4.gif" width="250" height="250" alt="6 Drones Horizon 4" style="margin-right: 10px;">
+  <img src="doc/figures/6DronesHorizon10.gif" width="250" height="250" alt="6 Drones Horizon 10" style="margin-right: 10px;">
 </p>
 Four-drone scenarios are easily solvable, but the chosen horizon should be neither too small nor too large.
 Six-drone scenarios are solvable, a small horizon will result in many calculation steps, a large horizon will slow down the calculation.
@@ -295,7 +295,7 @@ A parameter sweep over the MPC cost weights `q_pos`, `q_vel`, and `r_u` was cond
 - `r_u=0.8`, `q_pos=5.0`, `q_vel=0.2`
 
 <p align="center">
-  <img src="./figures/weight_heatmap.png" width="600" alt="QR Weight Parameter Sweep Heatmap">
+  <img src="doc/figures/weight_heatmap.png" width="600" alt="QR Weight Parameter Sweep Heatmap">
 </p>
 
 These serve as baseline weights for the adaptive safety zone tuning below.
@@ -325,7 +325,7 @@ A sweep of 1296 combinations (3 drones, central MPC, `box_8_1_5` room, 200 steps
 **Key insight — safety vs. reachability tradeoff:** Configurations with very high margins (safest) were too conservative for drones to reach their target. Configurations that reached target had tight but safe margins (~0.0). **Recommended balance:** `H=4`, `q_pos=4.0`, `r_u=0.5`, `alpha=0.3–0.4`, `lambda_vel=0.4–0.5`.
 
 <p align="center">
-  <img src="figures/full_adaptive_heatmap.png" width="600" alt="Adaptive Parameter Sweep Heatmap">
+  <img src="doc/figures/full_adaptive_heatmap.png" width="600" alt="Adaptive Parameter Sweep Heatmap">
 </p>
 
 #### Adaptive vs. Fixed Sphere Comparison (4 Drones)
