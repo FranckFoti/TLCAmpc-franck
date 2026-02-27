@@ -118,7 +118,7 @@ ipython_config.py
 .pdm-build/
 ../results/
 configs/
-drones_paper_tests/
+tests/drones_paper_tests/
 zzz_bak/
 *.pdf
 
@@ -213,3 +213,16 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+**/assets/**
+*.pt
+*.pth
+*.pyc
+*.pyo
+*.pyd
+*.log
+tools/*
+paper2_tools/*
+doc/*
+results/*
+logs/*
