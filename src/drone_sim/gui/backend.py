@@ -11,6 +11,7 @@ class DroneState:
     drone_id: str
     position: np.ndarray             # [x, y, z]
     velocity: np.ndarray             # [vx, vy, vz]
+    radius: float
     safety_zone: float
     adaptive_safety_radius: float | None   # None for non-adaptive drones
     max_adaptive_safety_radius: float | None

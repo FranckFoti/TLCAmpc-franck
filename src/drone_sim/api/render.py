@@ -4,12 +4,13 @@ import io
 
 import numpy as np
 from drone_sim.domain.drone import Drone
-from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_obstacles, draw_neighbor_links, draw_sphere_wireframe, draw_trace, draw_ghost_max_sphere, has_drones_safety_zones
+from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_obstacles, draw_neighbor_links, draw_sphere_wireframe, draw_trace, draw_ghost_max_sphere, has_drones_safety_zones, draw_obj_mesh
 
 def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drones: list[Drone], drone_traces: dict[str, list[np.ndarray]],
                obstacles: list[tuple[np.ndarray, np.ndarray]], step_count: int, compute_time_s: float, neighbor_links: list[tuple[int, int]] | None = None,
                admm_iteration_count: int | None = None, admm_converged: bool | None = None, safety_alphas: list[float] | None = None, width: int = 900,
-               height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0) -> bytes:
+               height: int = 700, dpi: int = 120, elev: float = 20.0, azim: float = -60.0,
+               obj_path: str | None = None, obj_scale: float = 0.3, draw_sphere_if_obj: bool = False) -> bytes:
    """Render a 3D scene to PNG bytes.
 
    This is intentionally simple (matplotlib wireframe room + points) to keep the REST API self-contained.
@@ -38,16 +39,19 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drones: list[Drone
             safety_zone = drone.compute_adaptive_radius(drone.velocity())
 
             pos = np.asarray(drone.position(), dtype=float).reshape(3)
-            s_to_print = max(20.0, float(r) * 250.0)  # scale radius to scatter size TODO, check if this complicate stuff is needed
-            ax.scatter([pos[0]], [pos[1]], [pos[2]], s=s_to_print, c=[drone.color], depthshade=True, label=drone.drone_id)
+            if obj_path is not None:
+               draw_obj_mesh(ax, pos, obj_path, scale=drone.radius*obj_scale*10, color=drone.color, alpha=0.8)
+            else:
+               ax.scatter([pos[0]], [pos[1]], [pos[2]], s=max(20.0, float(r) * 250.0), c=[drone.color], depthshade=True, label=drone.drone_id)
 
-            # Safety zones as wireframe spheres.
-            alpha_val = drone.alpha if safety_alphas else 0.8
-            draw_sphere_wireframe(ax, pos, radius=safety_zone, color=drone.safety_color, alpha=alpha_val, lw=0.6)
+            if obj_path is None or draw_sphere_if_obj:
+               # Safety zones as wireframe spheres.
+               alpha_val = drone.alpha if safety_alphas else 0.8
+               draw_sphere_wireframe(ax, pos, radius=safety_zone, color=drone.safety_color, alpha=alpha_val, lw=0.6)
+               # Ghost sphere: maximum adaptive radius (only when larger than current zone)
+               draw_ghost_max_sphere(ax, drone, print_always=False)
+
             draw_trace(ax, drone_traces.get(drone.drone_id, []), drone.trace_color)
-
-            # Ghost sphere: maximum adaptive radius (only when larger than current zone)
-            draw_ghost_max_sphere(ax, drone, print_always=False)
 
    ax.set_xlabel("x")
    ax.set_ylabel("y")

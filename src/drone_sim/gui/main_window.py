@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
 
 from drone_sim.gui.backend import StepResult, SimState
 from drone_sim.gui.direct_backend import DirectBackend
-from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_sphere_wireframe, draw_trace, draw_obstacles
+from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_sphere_wireframe, draw_trace, draw_obstacles, draw_obj_mesh
 
 _MAX_RUN_STEPS = 5000  # run-to-completion cap (matches paper2_tools/scenarios.py default)
 
@@ -37,6 +37,8 @@ class MainWindow(QMainWindow):
         self._traces: dict[str, list[list[float]]] = {}
         self._zoom: float = 1.0  # <1 zoomed in, >1 zoomed out; applied to room limits
         self._run_to_completion: bool = False
+        self._obj_path: Path | None = None  # path to .obj file for 3D drone model
+        self._obj_scale: float = 0.3  # scale of the OBJ model in world units
 
         # ---- Canvas ----
         fig = Figure()
@@ -52,6 +54,8 @@ class MainWindow(QMainWindow):
         self._btn_pause = QPushButton("Pause")
         self._btn_reset = QPushButton("Reset")
         self._btn_run_to_end = QPushButton("Run to Completion")
+        self._btn_obj_model = QPushButton("OBJ Model")
+        self._obj_model_label = QLabel("Model: scatter")
 
         # ---- Status widgets ----
         self._collision_label = QLabel("No Collisions")
@@ -102,6 +106,7 @@ class MainWindow(QMainWindow):
         self._btn_pause.clicked.connect(self._on_pause)
         self._btn_reset.clicked.connect(self._on_reset)
         self._btn_run_to_end.clicked.connect(self._on_run_to_completion)
+        self._btn_obj_model.clicked.connect(self._on_select_obj_model)
         self._speed_slider.valueChanged.connect(self._on_speed_changed)
 
         # ---- Keyboard shortcuts ----
@@ -252,15 +257,20 @@ class MainWindow(QMainWindow):
             safety_r = (drone.adaptive_safety_radius if drone.adaptive_safety_radius is not None else drone.safety_zone)
             safety_color = drone.safety_color
 
-            self._ax.scatter([pos[0]], [pos[1]], [pos[2]], s=80, c=[color] if isinstance(color, str) else [color], depthshade=True, label=drone.drone_id)
-            draw_sphere_wireframe(self._ax, pos, safety_r, color=safety_color, alpha=0.6, lw=0.6)
+            if self._obj_path is not None:
+                self._obj_scale = drone.radius
+                draw_obj_mesh(self._ax, pos, self._obj_path, scale=self._obj_scale, color=color if isinstance(color, str) else "steelblue", alpha=0.8)
+            else:
+                self._ax.scatter([pos[0]], [pos[1]], [pos[2]], s=80, c=[color] if isinstance(color, str) else [color], depthshade=True, label=drone.drone_id)
+                draw_sphere_wireframe(self._ax, pos, safety_r, color=safety_color, alpha=0.6, lw=0.6)
+                # Ghost sphere: maximum adaptive radius (only when larger than current zone)
+                _draw_ghost_max_sphere(self._ax, drone.adaptive_safety_radius is not None, pos, drone.adaptive_safety_radius, drone.max_adaptive_safety_radius,
+                                       safety_color)
 
             trace = self._traces.get(drone.drone_id, [])
             if trace:
                 draw_trace(self._ax, trace, drone.trace_color)
 
-            # Ghost sphere: maximum adaptive radius (only when larger than current zone)
-            _draw_ghost_max_sphere(self._ax, drone.adaptive_safety_radius is not None, pos, drone.adaptive_safety_radius, drone.max_adaptive_safety_radius, safety_color)
 
         # Set axis limits from room bounds, scaled by zoom level.
         # self._zoom is stored on self (not ax) so ax.cla() never resets it.
@@ -286,6 +296,25 @@ class MainWindow(QMainWindow):
 
     def _update_step_label(self, result: StepResult) -> None:
         self._step_label.setText(f"Step: {result.step_count} | t: {result.t:.2f} s")
+
+    # ------------------------------------------------------------------ #
+    # OBJ model selection                                                  #
+    # ------------------------------------------------------------------ #
+
+    def _on_select_obj_model(self) -> None:
+        """Open a file dialog to select an .obj file for 3D drone rendering.
+        Selecting 'Cancel' reverts to the default scatter marker."""
+        utils_dir = str(Path(__file__).resolve().parent.parent / "resources" / "assets")
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Select OBJ Model", utils_dir, "OBJ Files (*.obj)"
+        )
+        if path_str:
+            self._obj_path = Path(path_str)
+            self._obj_model_label.setText(f"Model: {self._obj_path.stem}")
+        else:
+            self._obj_path = None
+            self._obj_model_label.setText("Model: scatter")
+        self._canvas.draw_idle()
 
     # ------------------------------------------------------------------ #
     # Speed slider                                                        #
@@ -333,6 +362,8 @@ class MainWindow(QMainWindow):
             self._btn_pause.setParent(None)
             self._btn_reset.setParent(None)
             self._btn_run_to_end.setParent(None)
+            self._btn_obj_model.setParent(None)
+            self._obj_model_label.setParent(None)
             self._speed_slider.setParent(None)
             self._speed_label.setParent(None)
             self._collision_label.setParent(None)
@@ -354,6 +385,9 @@ class MainWindow(QMainWindow):
             ctrl_layout.addWidget(self._btn_pause)
             ctrl_layout.addWidget(self._btn_reset)
             ctrl_layout.addWidget(self._btn_run_to_end)
+            ctrl_layout.addSpacing(10)
+            ctrl_layout.addWidget(self._btn_obj_model)
+            ctrl_layout.addWidget(self._obj_model_label)
             ctrl_layout.addSpacing(15)
             ctrl_layout.addWidget(self._info_box)
             ctrl_layout.addWidget(self._collision_label)
@@ -383,6 +417,7 @@ class MainWindow(QMainWindow):
             ctrl_layout.addWidget(self._btn_pause)
             ctrl_layout.addWidget(self._btn_reset)
             ctrl_layout.addWidget(self._btn_run_to_end)
+            ctrl_layout.addWidget(self._btn_obj_model)
             ctrl_layout.addStretch()
             ctrl_layout.addWidget(QLabel("Speed:"))
             self._speed_slider.setOrientation(Qt.Orientation.Horizontal)
@@ -394,6 +429,7 @@ class MainWindow(QMainWindow):
 
             status_row = QHBoxLayout()
             status_row.addWidget(self._info_box)
+            status_row.addWidget(self._obj_model_label)
             status_row.addStretch()
             status_row.addWidget(self._collision_label)
             status_row.addWidget(self._admm_label)

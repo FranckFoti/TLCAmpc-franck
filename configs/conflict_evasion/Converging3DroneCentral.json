@@ -39,33 +39,33 @@
       "drone_id": "drone-1",
       "start": [-2.0, 0.0, 0.0],
       "target": [2.0, 0.0, 0.0],
-      "radius": 0.2,
+      "radius": 0.4,
       "safety_zone": 0.5,
       "cons_stop": 0.0,
       "physics": "default",
-      "alpha": 0.3,
+      "alpha": 0.4,
       "drone_color": "#00FFFF"
     },
     {
       "drone_id": "drone-2",
       "start": [1.0, 1.732, 0.0],
       "target": [-1.0, -1.732, 0.0],
-      "radius": 0.2,
+      "radius": 0.4,
       "safety_zone": 0.5,
       "cons_stop": 0.0,
       "physics": "default",
-      "alpha": 0.3,
+      "alpha": 0.4,
       "drone_color": "#800080"
     },
     {
       "drone_id": "drone-3",
       "start": [1.0, -1.732, 0.5],
       "target": [-1.0, 1.732, -0.5],
-      "radius": 0.2,
+      "radius": 0.4,
       "safety_zone": 0.5,
       "cons_stop": 0.0,
       "physics": "default",
-      "alpha": 0.3,
+      "alpha": 0.4,
       "drone_color": "#DC143C"
     }
   ]

@@ -117,12 +117,14 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
       admm_iteration_count = sim.coordinator.get_last_iteration_count() if is_distributed else None
       admm_converged = sim.coordinator.get_last_converged() if is_distributed else None
 
+      # obj_path = Path(__file__).resolve().parent.parent / "src" / "drone_sim" / "resources" / "assets" / "drone_costum_0_0_5.obj"
       png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max, drones=sim.drones,
                              drone_traces=traces, obstacles=sim.obstacles,
                              step_count=sim.step_count, compute_time_s=sim.compute_time_s,
                              neighbor_links=neighbor_links, admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
                              safety_alphas=safety_alphas,
                              width=width, height=height, dpi=dpi, elev=elev, azim=azim
+                             # ,obj_path=str(obj_path), obj_scale=0.5, draw_sphere_if_obj=True
                              )
 
       # For display
