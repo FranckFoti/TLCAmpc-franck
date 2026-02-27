@@ -118,7 +118,7 @@ ipython_config.py
 .pdm-build/
 ../results/
 configs/
-tests/drones_paper_tests/
+results/drones_paper_tests/
 zzz_bak/
 *.pdf
 
