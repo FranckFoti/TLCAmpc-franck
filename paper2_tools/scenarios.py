@@ -106,7 +106,7 @@ def process_scenarios(scenarios: list[tuple[ScenarioConfig, int]], result_path: 
          out_dir=Path(result_path),
          max_steps=5000,
          trace_len=5000,
-         timeout=600,
+         timeout=600000,
          should_print_gif=should_print_gif
       )
       for scenario, i in scenarios
@@ -167,6 +167,7 @@ def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: floa
                except Exception as e:
                   print(f'Building scenario run {i}/{sum_runs}: {n} drones, {coord}, {controller}, '
                         f'{adaptive_safety_zone if controller == 'mpc_agent_adaptive' else static_safety_zone}: {e}')
+                  _print_results([0.0], horizon, 0.0, n, csv_path, Status.INFEASIBLE, [0], [0.0], 0.0, coord, controller)
    process_scenarios(scenarios=scenarios, result_path=csv_path, n_jobs=-1, should_print_gif=False)
 
 
@@ -194,7 +195,10 @@ def main(argv: list[str] | None = None):
    match args.scenario:
       case '1_1':
          # run_scenario_1_1()
-         pass
+         result_path = Path(__file__).parent / 'paper2_results' / "result_30"
+         cfg = tools.utility.scenario_creator.create_scenario(horizon=_HORIZON, dt=_DT, controller_type="mpc_agent_adaptive", coordinator_type="mpc_central", physics_u=3.0,
+                                                              physics_v=2.5, room_size=8.0, n_drones=30,  alpha=0.5, drones_radius=0.6, safety_zone=1.0)
+         process_scenarios([(cfg, 1)], result_path, 1, False)
       case '1_2':
          # python -m paper2_tools.scenarios --scenario 1_2 --num_jobs -1 --runs 9 --result_path results_s_1_2 --n_crit 11 --u_max 3.0 --v_max 2.5 --static_safety_zone 1.52 --adaptive_safety_zone 1.0 --room_size 8.0 --log-level INFO v_max=2.5, u_max=3.0, alpha=0.5, adaptive safety_zone=1.0; static safety_zone=1.52 -> n_crit=11
          run_scenario_1_2(result_path=args.result_path, n_threads=args.num_jobs, v_max=args.v_max, u_max=args.u_max, horizon=args.horizon,
