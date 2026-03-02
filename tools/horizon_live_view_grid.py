@@ -70,7 +70,7 @@ tuple[int, int, str]:
       return (num_drones, horizon, f"exception: {e}")
 
 
-def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int, timeout: float | None = None) -> tuple[
+def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int, timeout: float | None = None, store_gif: bool = True) -> tuple[
    Status, float, float, list[float], list[float], list[float], list[Image.Image]]:
    """
    Run one (N, H) pair using direct simulator execution and returns all relevant information to create csv and gif
@@ -150,7 +150,8 @@ def run_single_scenario(scenario: ScenarioConfig, max_steps: int, trace_len: int
       return Status.ERROR, time.perf_counter() - t0, _compute_jerk_3d_value(), step_durations, step_mean_pair_dists, all_pair_dists, frames
 
    for step_idx in range(max_steps):
-      render_frame(sim)
+      if store_gif:
+         render_frame(sim)
       if status != Status.RUNNING:
          break
 
