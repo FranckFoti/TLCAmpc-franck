@@ -108,7 +108,7 @@ def _run_worker(cfg_queue_csv_path: Path, lock_path: Path, result_dir: Path, v_m
 
       print(f'  Starting {n_drones} drones ({cfg.controller.type}, {cfg.coordinator.type})')
       status, wall_time, jerk_3d_value, step_durations, step_mean_pair_dists, all_pair_dists, frames = run_single_scenario(scenario=cfg, max_steps=10000,
-            trace_len=10000, timeout=600000)
+            trace_len=10000, timeout=600000, store_gif=False)
       _print_results(all_pair_dists=all_pair_dists, jerk_3d_value=jerk_3d_value, num_drones=n_drones, out_dir=result_dir, status=status,
                      step_durations=step_durations, step_mean_pair_dists=step_mean_pair_dists, wall_time=wall_time, coordinator_type=cfg.coordinator.type,
                      controller_type=cfg.controller.type, horizon=_HORIZON)

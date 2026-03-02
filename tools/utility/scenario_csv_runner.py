@@ -115,8 +115,12 @@ def update_row(queue_path: Path, lock_path: Path, index: int) -> None:
                elif row['status'] == QueueStatus.IN_PROCESS:
                   row['status'] = QueueStatus.DONE
                else:
-                  print("Warning: strange status for: " + row.copy())
+                  print(f"Warning: strange status for: {row}")
                   row['status'] = QueueStatus.ERROR
+      with queue_path.open('w', newline='', encoding='utf-8') as f:
+         writer = csv.DictWriter(f, fieldnames=_SCENARIO_QUEUE_FIELDNAMES)
+         writer.writeheader()
+         writer.writerows(rows)
 
 def count_remaining_scenarios(queue_path: Path, lock_path: Path) -> tuple[int, int]:
    """
