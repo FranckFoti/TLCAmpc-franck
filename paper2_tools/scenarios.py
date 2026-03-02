@@ -3,14 +3,6 @@
 Each function returns a ScenarioConfig that can be used directly with the
 Simulator, or passed to sweep scripts. Parameters like n_drones, alpha, and
 comm_radius are exposed so calling code can vary them systematically.
-
-Standard physics defaults (used unless a scenario overrides them):
-  r_min        = 0.4   (drone physical radius)
-  v_max        = 3.0
-  u_max        = 3.0
-  safety_zone  = 1.2   (= 3 * r_min)
-  dt           = 0.1
-  horizon      = 4
 """
 
 from __future__ import annotations
@@ -19,9 +11,12 @@ from pathlib import Path
 import logging
 import csv
 import argparse
+import filelock
+import multiprocessing
 import gc
 import numpy as np
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from joblib import Parallel, delayed
 
 import tools.utility.scenario_creator
@@ -29,18 +24,21 @@ from drone_sim.domain.config import ScenarioConfig
 from tools.horizon_live_view_grid import run_single_scenario, print_results_prep
 from tools.utility.printer import Status, print_gif
 from paper2_tools.plot_scenario_1_2 import main as plot_scenario_1_2
+from tools.utility.scenario_csv_runner import create_queue, claim_row, update_row, count_remaining_scenarios
+from tools.utility.scenario_creator import create_scenario
+from tools.utility.ram_usage import wait_for_ram
 
 # adaptive -> mpc_agent_adaptive
 # static- > mpc_agent
 # central -> mpc_central
 # distributed -> dmpc_admm
-COORDINATORS = ['mpc_central', 'dmpc_admm']  # dmpc_threaded
+COORDINATORS = ['mpc_central', 'dmpc_admm']
 CONTROLLERS = ['mpc_agent', 'mpc_agent_adaptive']
 _HORIZON: int = 4
 _DT: float = 0.1
-
-# Lock for thread-safe CSV writing (filelock for multiprocessing)
-import filelock
+# Constants for scenario 1_2 CSV-based processing
+_RAM_THRESHOLD_GB = 5.0
+_HIGH_DRONE_THRESHOLD = 20
 
 
 def _print_results(all_pair_dists: list[float], horizon: int, jerk_3d_value: float, num_drones: int, out_dir: Path, status: Status, step_durations: list[float],
@@ -96,6 +94,26 @@ def _run_scenario_wrapper(scenario: ScenarioConfig, out_dir: Path, max_steps: in
       gc.collect()
 
 
+def _run_worker(cfg_queue_csv_path: Path, lock_path: Path, result_dir: Path, v_max: float, u_max: float, room_size: float, alpha: float,
+                static_safety_zone: float, adaptive_safety_zone: float, r_min: float):
+   # as long as there is enough ram and as long as there is a free worker, start new worker:
+   queue_row = claim_row(cfg_queue_csv_path, lock_path)
+   queue_id = queue_row['id']  # id to update
+   n_drones = queue_row['n_drones']
+   coordinator = queue_row['coordinator']
+   controller = queue_row['controller']
+   cfg = create_scenario(horizon=_HORIZON, dt=_DT, controller_type=controller, coordinator_type=coordinator, physics_u=u_max, physics_v=v_max,
+                         room_size=room_size, n_drones=n_drones, alpha=alpha if controller == 'mpc_agent_adaptive' else None, drones_radius=r_min,
+                         safety_zone=adaptive_safety_zone if controller == 'mpc_agent_adaptive' else static_safety_zone)
+
+   print(f'  Starting {n_drones} drones ({cfg.controller.type}, {cfg.coordinator.type})')
+   status, wall_time, jerk_3d_value, step_durations, step_mean_pair_dists, all_pair_dists, frames = run_single_scenario(scenario=cfg, max_steps=10000,
+         trace_len=10000, timeout=600000)
+   _print_results(all_pair_dists, jerk_3d_value, n_drones, result_dir, status, step_durations, step_mean_pair_dists, wall_time, cfg.coordinator.type,
+                  cfg.controller.type)
+   update_row(cfg_queue_csv_path, lock_path, queue_id)
+
+
 def process_scenarios(scenarios: list[tuple[ScenarioConfig, int]], result_path: Path, n_jobs: int, should_print_gif: bool = False):
    total_scenarios = len(scenarios)
    print(f'Processing {total_scenarios} scenarios with {n_jobs} jobs...')
@@ -141,34 +159,29 @@ def run_scenario_1_3(result_path: str, room_size: float, v_max: float, u_max: fl
    process_scenarios(scenarios=scenarios, result_path=csv_path, n_jobs=1, should_print_gif=True)
 
 
-def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: float, horizon: int, room_size: float, n_runs: int, alpha: float, n_crit: int,
+def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: float, room_size: float, n_runs: int, alpha: float, n_crit: int,
                      static_safety_zone: float, adaptive_safety_zone: float, r_min: float):
-   csv_path = Path(__file__).parent / 'paper2_results' / result_path
-   runs = range(n_runs)
+   result_dir = Path(__file__).parent / 'paper2_results' / result_path
+   result_dir.mkdir(parents=True, exist_ok=True)
+   
+   cfg_queue_csv_path = result_dir / 'scenarios_queue.csv'
+   lock_path = cfg_queue_csv_path.with_suffix('.csv.lock')
 
-   drones_range = range(max(2, int(n_crit * 0.5)), n_crit + 2)
+   create_queue(cfg_queue_csv_path, range(n_runs), range(2, n_crit + 2), COORDINATORS, CONTROLLERS)
+   
+   n_workers = n_threads if n_threads > 0 else multiprocessing.cpu_count()
+   print(f'Starting {n_workers} worker processes...')
 
-   sum_runs = len(runs) * len(drones_range) * len(COORDINATORS) * len(COORDINATORS)
+   to_be_done, _ = count_remaining_scenarios(cfg_queue_csv_path, lock_path)
+   while to_be_done > 0:
+      # check every 30 second if there is enough rum and wait if not
+      wait_for_ram(threshold_gb=_RAM_THRESHOLD_GB, check_interval=30)
+      #TODO check if there is a free worker and start, otherwise wait for a free worker
+      _run_worker(cfg_queue_csv_path, lock_path, result_dir, v_max, u_max, room_size, alpha, static_safety_zone, adaptive_safety_zone, r_min)
 
-   scenarios = []
-   for i in runs:
-      for n in drones_range:
-         for coord in COORDINATORS:
-            for controller in CONTROLLERS:
-               try:
-                  print(f'Building scenario run {i}: {n} drones, {coord}, {controller}, {coord}')
-                  cfg = tools.utility.scenario_creator.create_scenario(horizon=horizon, dt=_DT, controller_type=controller, coordinator_type=coord,
-                                                                       physics_u=u_max, physics_v=v_max, room_size=room_size, n_drones=n,
-                                                                       alpha=alpha if controller == 'mpc_agent_adaptive' else None, drones_radius=r_min,
-                                                                       safety_zone=adaptive_safety_zone if controller == 'mpc_agent_adaptive' else
-                                                                       static_safety_zone)
-                  if cfg is not None:
-                     scenarios.append((cfg, i))
-               except Exception as e:
-                  print(f'Building scenario run {i}/{sum_runs}: {n} drones, {coord}, {controller}, '
-                        f'{adaptive_safety_zone if controller == 'mpc_agent_adaptive' else static_safety_zone}: {e}')
-                  _print_results([0.0], horizon, 0.0, n, csv_path, Status.INFEASIBLE, [0], [0.0], 0.0, coord, controller)
-   process_scenarios(scenarios=scenarios, result_path=csv_path, n_jobs=-1, should_print_gif=False)
+      # check if there is one more scenario to do
+      to_be_done, _ = count_remaining_scenarios(cfg_queue_csv_path, lock_path)
+      #TODO: if to_be_done is '0', wait for the workers and exit after last is finished
 
 
 def main(argv: list[str] | None = None):
@@ -205,6 +218,7 @@ def main(argv: list[str] | None = None):
                           room_size=args.room_size, n_runs=args.runs, n_crit=args.n_crit, alpha=1.5, static_safety_zone=args.static_safety_zone,
                           adaptive_safety_zone=args.adaptive_safety_zone, r_min=args.r_min)
          plot_scenario_1_2(args.result_path)
+         # hetzner-run: python -m paper2_tools.scenarios --scenario 1_2 --result_path results_n38 --u_max 3.0 --v_max 2.5 --static_safety_zone 1.52 --adaptive_safety_zone 1.0 --room_size 8.0 --alpha 0.5 --log-level INFO --num_jobs -1 --runs 20 --n_crit 35
       case '1_3':
          # python -m paper2_tools.scenarios --scenario 1_3 --result_path results_s_1_3 --u_max 3.0 --v_max 2.5 --static_safety_zone 1.52  --adaptive_safety_zone 1.0 --room_size 10.0 --alpha 0.5 --log-level INFO
          run_scenario_1_3(result_path=args.result_path, room_size=args.room_size, v_max=args.v_max, u_max=args.u_max, alpha=args.alpha, static_safety_zone=args.static_safety_zone,
