@@ -16,7 +16,7 @@ import multiprocessing
 import gc
 import numpy as np
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from joblib import Parallel, delayed
 
 import tools.utility.scenario_creator
@@ -96,23 +96,27 @@ def _run_scenario_wrapper(scenario: ScenarioConfig, out_dir: Path, max_steps: in
 
 def _run_worker(cfg_queue_csv_path: Path, lock_path: Path, result_dir: Path, v_max: float, u_max: float, room_size: float, alpha: float,
                 static_safety_zone: float, adaptive_safety_zone: float, r_min: float):
-   # as long as there is enough ram and as long as there is a free worker, start new worker:
    queue_row = claim_row(cfg_queue_csv_path, lock_path)
-   queue_id = queue_row['id']  # id to update
-   n_drones = queue_row['n_drones']
-   coordinator = queue_row['coordinator']
-   controller = queue_row['controller']
-   cfg = create_scenario(horizon=_HORIZON, dt=_DT, controller_type=controller, coordinator_type=coordinator, physics_u=u_max, physics_v=v_max,
-                         room_size=room_size, n_drones=n_drones, alpha=alpha if controller == 'mpc_agent_adaptive' else None, drones_radius=r_min,
-                         safety_zone=adaptive_safety_zone if controller == 'mpc_agent_adaptive' else static_safety_zone)
+   queue_id = queue_row['id']
+   try:
+      n_drones = int(queue_row['n_drones'])
+      coordinator = queue_row['coordinator']
+      controller = queue_row['controller']
+      cfg = create_scenario(horizon=_HORIZON, dt=_DT, controller_type=controller, coordinator_type=coordinator, physics_u=u_max, physics_v=v_max,
+                            room_size=room_size, n_drones=n_drones, alpha=alpha if controller == 'mpc_agent_adaptive' else None, drones_radius=r_min,
+                            safety_zone=adaptive_safety_zone if controller == 'mpc_agent_adaptive' else static_safety_zone)
 
-   print(f'  Starting {n_drones} drones ({cfg.controller.type}, {cfg.coordinator.type})')
-   status, wall_time, jerk_3d_value, step_durations, step_mean_pair_dists, all_pair_dists, frames = run_single_scenario(scenario=cfg, max_steps=10000,
-         trace_len=10000, timeout=600000)
-   _print_results(all_pair_dists, jerk_3d_value, n_drones, result_dir, status, step_durations, step_mean_pair_dists, wall_time, cfg.coordinator.type,
-                  cfg.controller.type)
-   update_row(cfg_queue_csv_path, lock_path, queue_id)
-
+      print(f'  Starting {n_drones} drones ({cfg.controller.type}, {cfg.coordinator.type})')
+      status, wall_time, jerk_3d_value, step_durations, step_mean_pair_dists, all_pair_dists, frames = run_single_scenario(scenario=cfg, max_steps=10000,
+            trace_len=10000, timeout=600000)
+      _print_results(all_pair_dists, jerk_3d_value, n_drones, result_dir, status, step_durations, step_mean_pair_dists, wall_time, cfg.coordinator.type,
+                     cfg.controller.type)
+      update_row(cfg_queue_csv_path, lock_path, queue_id)
+   except Exception as e:
+      print(f"Exception in worker: {e}")
+   finally:
+      update_row(cfg_queue_csv_path, lock_path, queue_id)
+      gc.collect()
 
 def process_scenarios(scenarios: list[tuple[ScenarioConfig, int]], result_path: Path, n_jobs: int, should_print_gif: bool = False):
    total_scenarios = len(scenarios)
@@ -172,16 +176,32 @@ def run_scenario_1_2(result_path: str, n_threads: int, v_max: float, u_max: floa
    n_workers = n_threads if n_threads > 0 else multiprocessing.cpu_count()
    print(f'Starting {n_workers} worker processes...')
 
-   to_be_done, _ = count_remaining_scenarios(cfg_queue_csv_path, lock_path)
-   while to_be_done > 0:
-      # check every 30 second if there is enough rum and wait if not
-      wait_for_ram(threshold_gb=_RAM_THRESHOLD_GB, check_interval=30)
-      #TODO check if there is a free worker and start, otherwise wait for a free worker
-      _run_worker(cfg_queue_csv_path, lock_path, result_dir, v_max, u_max, room_size, alpha, static_safety_zone, adaptive_safety_zone, r_min)
-
-      # check if there is one more scenario to do
+   with ProcessPoolExecutor(max_workers=n_workers) as executor:
+      futures = set()
       to_be_done, _ = count_remaining_scenarios(cfg_queue_csv_path, lock_path)
-      #TODO: if to_be_done is '0', wait for the workers and exit after last is finished
+      
+      while to_be_done > 0 or futures:
+         # check if there is a free worker and start new task
+         while len(futures) < n_workers and to_be_done > 0:
+            # check every 30 seconds if there is enough ram before starting a new worker
+            wait_for_ram(threshold_gb=_RAM_THRESHOLD_GB, check_interval=30)
+            future = executor.submit(_run_worker, cfg_queue_csv_path, lock_path, result_dir, v_max, u_max, room_size, alpha, static_safety_zone, adaptive_safety_zone, r_min)
+            futures.add(future)
+            to_be_done, _ = count_remaining_scenarios(cfg_queue_csv_path, lock_path)
+         
+         if not futures:
+            break
+            
+         # wait for at least one worker to finish
+         done, futures = wait(futures, return_when=FIRST_COMPLETED)
+         for f in done:
+            try:
+               f.result()
+            except Exception as e:
+               print(f'Worker failed with exception: {e}')
+         
+         # update remaining scenarios count
+         to_be_done, _ = count_remaining_scenarios(cfg_queue_csv_path, lock_path)
 
 
 def main(argv: list[str] | None = None):
@@ -214,7 +234,7 @@ def main(argv: list[str] | None = None):
          process_scenarios([(cfg, 1)], result_path, 1, False)
       case '1_2':
          # python -m paper2_tools.scenarios --scenario 1_2 --num_jobs -1 --runs 9 --result_path results_s_1_2 --n_crit 11 --u_max 3.0 --v_max 2.5 --static_safety_zone 1.52 --adaptive_safety_zone 1.0 --room_size 8.0 --log-level INFO v_max=2.5, u_max=3.0, alpha=0.5, adaptive safety_zone=1.0; static safety_zone=1.52 -> n_crit=11
-         run_scenario_1_2(result_path=args.result_path, n_threads=args.num_jobs, v_max=args.v_max, u_max=args.u_max, horizon=args.horizon,
+         run_scenario_1_2(result_path=args.result_path, n_threads=args.num_jobs, v_max=args.v_max, u_max=args.u_max,
                           room_size=args.room_size, n_runs=args.runs, n_crit=args.n_crit, alpha=1.5, static_safety_zone=args.static_safety_zone,
                           adaptive_safety_zone=args.adaptive_safety_zone, r_min=args.r_min)
          plot_scenario_1_2(args.result_path)

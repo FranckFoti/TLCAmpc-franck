@@ -2,6 +2,7 @@ from enum import StrEnum
 from pathlib import Path
 import filelock
 import csv
+import os
 
 class QueueStatus(StrEnum):
    TO_BE_DONE = "toBeDone"
@@ -14,7 +15,7 @@ _SCENARIO_QUEUE_FIELDNAMES = ['id', 'status', 'n_drones', 'coordinator', 'contro
 _COORDINATORS = ['mpc_central', 'dmpc_admm', 'dmpc_threaded']
 _CONTROLLERS = ['mpc_agent', 'mpc_agent_adaptive']
 
-def create_queue(queue_path: Path, runs: range, drones: range, coordinators: list[str] = _COORDINATORS, controllers: list[str] = _CONTROLLERS):
+def create_queue(queue_path: Path, runs: range, drones: range, coordinators: list[str]|None = None, controllers: list[str]|None = None):
    """
    create queue csv. If its already exists, clean it, while set all 'in progress' states to 'to be done'
    :param queue_path: path to the queue_csv
@@ -24,23 +25,48 @@ def create_queue(queue_path: Path, runs: range, drones: range, coordinators: lis
    :param controllers:
    """
    queue_path.parent.mkdir(parents=True, exist_ok=True)
-   #TODO check if csv already exits, if exists, update all lines with "in_process" to "to_be_done"
+   if os.path.exists(queue_path):
+      changed = 0
+      to_be_done = 0
+      rows = []
+      with queue_path.open('r', newline='', encoding='utf-8') as f:
+         reader = csv.DictReader(f)
+         rows = list(reader)
+         for row in rows:
+            if row['status'] == QueueStatus.IN_PROCESS:
+               row['status'] = QueueStatus.TO_BE_DONE
+               changed += 1
+            if row['status'] == QueueStatus.TO_BE_DONE:
+               to_be_done += 1
+      with queue_path.open('w', newline='', encoding='utf-8') as f:
+         writer = csv.DictWriter(f, fieldnames=_SCENARIO_QUEUE_FIELDNAMES)
+         writer.writeheader()
+         writer.writerows(rows)
 
-   rows = []
-   index = 0
-   for _ in runs:
-      for n in drones:
-         for coord in coordinators:
-            for controller in controllers:
-               rows.append({'id': index, 'status': QueueStatus.TO_BE_DONE, 'n_drones': n, 'coordinator': coord, 'controller': controller})
-               index += 1
+      if changed > 0:
+         print(f'Fixed already existing scenario CSV with {len(rows)} entries at {queue_path}, repaired {changed} lines')
+      else:
+         print(f'Found already existing scenario CSV with {len(rows)} entries at {queue_path}, nothing done')
+      print(f"still to be done: {to_be_done}")
 
-   with queue_path.open('w', newline='', encoding='utf-8') as f:
-      writer = csv.DictWriter(f, fieldnames=_SCENARIO_QUEUE_FIELDNAMES)
-      writer.writeheader()
-      writer.writerows(rows)
+   else:
+      rows = []
+      index = 0
+      coordinators = coordinators if coordinators is not None else _COORDINATORS
+      controllers = controllers if controllers is not None else _CONTROLLERS
+      for _ in runs:
+         for n in drones:
+            for coord in coordinators:
+               for controller in controllers:
+                  rows.append({'id': index, 'status': QueueStatus.TO_BE_DONE, 'n_drones': n, 'coordinator': coord, 'controller': controller})
+                  index += 1
 
-   print(f'Created scenario CSV with {len(rows)} entries at {queue_path}')
+      with queue_path.open('w', newline='', encoding='utf-8') as f:
+         writer = csv.DictWriter(f, fieldnames=_SCENARIO_QUEUE_FIELDNAMES)
+         writer.writeheader()
+         writer.writerows(rows)
+
+      print(f'Created scenario CSV with {len(rows)} entries at {queue_path}')
 
 def claim_row(queue_path: Path, lock_path: Path):
    """
