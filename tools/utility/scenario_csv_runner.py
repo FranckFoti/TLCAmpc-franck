@@ -112,8 +112,10 @@ def update_row(queue_path: Path, lock_path: Path, index: int) -> None:
             if row['id'] == index:
                if row['status'] == QueueStatus.TO_BE_DONE:
                   row['status'] = QueueStatus.IN_PROCESS
+                  break
                elif row['status'] == QueueStatus.IN_PROCESS:
                   row['status'] = QueueStatus.DONE
+                  break
                else:
                   print(f"Warning: strange status for: {row}")
                   row['status'] = QueueStatus.ERROR
