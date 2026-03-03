@@ -10,7 +10,7 @@ resource "hcloud_server" "worker" {
   user_data = templatefile("${path.module}/cloud-init-worker.yaml.tpl", {
     db_password        = var.db_password
     db_private_ip      = one(hcloud_server.db.network[*].ip)
-    deploy_key_private = var.deploy_key_private
+    deploy_key_b64     = base64encode(var.deploy_key_private)
     git_repo_url       = var.git_repo_url
     git_branch         = var.git_branch
     v_max              = var.scenario_v_max

@@ -13,13 +13,13 @@ variable "worker_count" {
 variable "worker_server_type" {
   description = "Hetzner server type for workers"
   type        = string
-  default     = "ccx33"
+  default     = "cpx62"
 }
 
 variable "db_server_type" {
   description = "Hetzner server type for the DB server"
   type        = string
-  default     = "ccx13"
+  default     = "cpx22"
 }
 
 variable "deploy_key_private" {
