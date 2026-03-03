@@ -1,0 +1,32 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# NEVER commit terraform.tfvars — it contains secrets.
+
+hcloud_token = "your-hetzner-api-token"
+db_password  = "a-strong-random-password"
+
+ssh_public_key = "ssh-ed25519 AAAA... you@machine"
+
+# Generate a read-only deploy key: ssh-keygen -t ed25519 -f deploy_key -N ""
+# Add deploy_key.pub as a deploy key in GitHub repo settings
+deploy_key_private = <<-EOT
+-----BEGIN OPENSSH PRIVATE KEY-----
+paste-your-deploy-key-here
+-----END OPENSSH PRIVATE KEY-----
+EOT
+
+git_repo_url = "git@github.com:YourUser/TLCAmpc.git"
+git_branch   = "main"
+
+# Infrastructure sizing
+worker_count       = 2
+worker_server_type = "cpx41"   # 8 vCPU, 16 GB RAM
+db_server_type     = "cpx11"   # 2 vCPU, 2 GB RAM
+location           = "fsn1"
+
+# Scenario parameters (matching scenario 1_2 defaults)
+scenario_v_max                = 2.5
+scenario_u_max                = 3.0
+scenario_room_size            = 8.0
+scenario_static_safety_zone   = 1.52
+scenario_adaptive_safety_zone = 1.0
+scenario_r_min                = 0.4

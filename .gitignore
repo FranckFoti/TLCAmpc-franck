@@ -221,8 +221,15 @@ __marimo__/
 *.pyo
 *.pyd
 *.log
-tools/*
-paper2_tools/*
+#tools/*
+#paper2_tools/*
 doc/*
 results/*
 logs/*
+
+# Terraform
+infrastructure/terraform/.terraform/
+infrastructure/terraform/.terraform.lock.hcl
+infrastructure/terraform/terraform.tfstate
+infrastructure/terraform/terraform.tfstate.backup
+infrastructure/terraform/terraform.tfvars
