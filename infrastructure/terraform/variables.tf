@@ -13,18 +13,13 @@ variable "worker_count" {
 variable "worker_server_type" {
   description = "Hetzner server type for workers"
   type        = string
-  default     = "cpx41"
+  default     = "ccx33"
 }
 
 variable "db_server_type" {
   description = "Hetzner server type for the DB server"
   type        = string
-  default     = "cpx11"
-}
-
-variable "ssh_public_key" {
-  description = "SSH public key for server access"
-  type        = string
+  default     = "ccx13"
 }
 
 variable "deploy_key_private" {
