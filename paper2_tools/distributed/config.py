@@ -15,7 +15,7 @@ ALPHA: float = 1.5
 
 MAX_STEPS: int = 10000
 TRACE_LEN: int = 10000
-TIMEOUT_MS: int = 600000
+TIMEOUT_MS: int = 86400
 
 
 def get_database_url() -> str:
