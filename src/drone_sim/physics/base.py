@@ -16,5 +16,22 @@ class PhysicsModel:
    def v_max(self) -> float:
       return self._v_max
 
+   def predict_trajectory(self, x0: np.ndarray, u_seq: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+      """Predict position and velocity trajectories from initial state and controls.
+
+      :param x0: Initial state (6,).
+      :param u_seq: Control sequence (H, 3).
+      :return: (positions (H, 3), velocities (H, 3)).
+      """
+      H = u_seq.shape[0]
+      positions = np.zeros((H, 3), dtype=float)
+      velocities = np.zeros((H, 3), dtype=float)
+      x = np.asarray(x0, dtype=float).reshape(6)
+      for k in range(H):
+         x = self.step(x, u_seq[k])
+         positions[k] = x[:3]
+         velocities[k] = x[3:6]
+      return positions, velocities
+
    def central_bounds(self) -> tuple[list[float], list[float]]:
       return self._u_min, self._u_max

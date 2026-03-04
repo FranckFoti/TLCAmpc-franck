@@ -46,7 +46,7 @@ class LocalMPCSolver:
 
    def solve(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray | None]],
              obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None, room_max: np.ndarray | None = None,
-             u_prev: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, bool]:
+             u_prev: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, bool, np.ndarray]:
       """ Solve local MPC problem for a single drone.
 
       :param drone: Drone object with state, route, controller, and physics
@@ -60,6 +60,7 @@ class LocalMPCSolver:
          u_opt: Optimized control sequence (horizon, 3)
          traj_opt: Optimized position trajectory (horizon, 3)
          success: Whether optimization succeeded
+         vel_opt: Optimized velocity trajectory (horizon, 3)
       """
       controller = drone.controller
       obstacles = obstacles or []
@@ -113,7 +114,7 @@ class LocalMPCSolver:
                         options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})
 
       u_opt = np.clip(result.x.reshape((horizon, 3)), u_min, u_max)
-      traj_opt, _ = self._predict_states(drone, u_opt)
+      traj_opt, vel_opt = self._predict_states(drone, u_opt)
 
       # Check constraint satisfaction
       g = constraints(u_opt.flatten())
@@ -121,47 +122,49 @@ class LocalMPCSolver:
 
       # Infeasible fallback: decelerate, then hold position
       if not feasible:
-         u_opt, traj_opt, feasible = self._infeasible_fallback(drone, u_opt, traj_opt, constraints, u_min, u_max, horizon, )
+         u_opt, traj_opt, vel_opt, feasible = self._infeasible_fallback(drone, u_opt, traj_opt, constraints, u_min, u_max, horizon, )
 
       if _log.isEnabledFor(logging.DEBUG):
          self._debug_log_feasibility_check(drone, neighbor_trajectories, feasible, result, traj_opt, g)
 
-      return u_opt, traj_opt, feasible
+      return u_opt, traj_opt, feasible, vel_opt
 
    def _infeasible_fallback(self, drone: Drone, u_opt: np.ndarray, traj_opt: np.ndarray, constraints_fn, u_min: np.ndarray, u_max: np.ndarray,
-         horizon: int, ) -> tuple[np.ndarray, np.ndarray, bool]:
+         horizon: int, ) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
       """Try safe fallback controls when the optimizer returns infeasible.
 
       Fallback order:
       1. Decelerate — brake toward zero velocity
       2. Hold position — zero control (no acceleration, let the other drone resolve)
 
-      :return: (u, trajectory, feasible) for the best fallback found
+      :return: (u, trajectory, velocities, feasible) for the best fallback found
       """
       v_current = np.asarray(drone.x, dtype=float)[3:6]
 
       # Fallback 1: decelerate (brake toward zero velocity)
       u_decel_step = np.clip(-v_current / self.dt, u_min, u_max)
       u_decel = np.tile(u_decel_step, (horizon, 1))
-      traj_decel, _ = self._predict_states(drone, u_decel)
+      traj_decel, vel_decel = self._predict_states(drone, u_decel)
       g_decel = constraints_fn(u_decel.flatten())
       if len(g_decel) == 0 or g_decel.min() >= -1e-6:
          _log.debug("  fallback: DECELERATE for %s", drone.drone_id)
-         return u_decel, traj_decel, True
+         return u_decel, traj_decel, vel_decel, True
 
       # Fallback 2: zero control (hold — don't accelerate)
       u_zero = np.zeros((horizon, 3))
-      traj_zero, _ = self._predict_states(drone, u_zero)
+      traj_zero, vel_zero = self._predict_states(drone, u_zero)
       g_zero = constraints_fn(u_zero.flatten())
       if len(g_zero) == 0 or g_zero.min() >= -1e-6:
          _log.debug("  fallback: HOLD for %s", drone.drone_id)
-         return u_zero, traj_zero, True
+         return u_zero, traj_zero, vel_zero, True
 
       # All fallbacks failed — pick the least-violating option
-      options = [(u_opt, traj_opt, constraints_fn(u_opt.flatten())), (u_decel, traj_decel, g_decel), (u_zero, traj_zero, g_zero), ]
-      best_u, best_traj, _ = max(options, key=lambda o: o[2].min() if len(o[2]) else 0.0)
+      options = [(u_opt, traj_opt, None, constraints_fn(u_opt.flatten())), (u_decel, traj_decel, vel_decel, g_decel), (u_zero, traj_zero, vel_zero, g_zero), ]
+      best_u, best_traj, best_vel, _ = max(options, key=lambda o: o[3].min() if len(o[3]) else 0.0)
+      if best_vel is None:
+         _, best_vel = self._predict_states(drone, best_u)
       _log.debug("  fallback: ALL FAILED for %s, using least-violating", drone.drone_id)
-      return best_u, best_traj, False
+      return best_u, best_traj, best_vel, False
 
    def _predict_states(self, drone: Drone, u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
       """Predict position and velocity trajectories from state and controls.
@@ -170,18 +173,7 @@ class LocalMPCSolver:
       :param u: Control sequence (horizon, 3)
       :return: Tuple of (predicted_positions, predicted_velocities), each (horizon, 3)
       """
-      horizon = u.shape[0]
-
-      x = np.asarray(drone.x, dtype=float).reshape(6)
-      positions = np.zeros((horizon, 3), dtype=float)
-      velocities = np.zeros((horizon, 3), dtype=float)
-
-      for step in range(horizon):
-         x = drone.physics.step(x, u[step])
-         positions[step] = x[:3]
-         velocities[step] = x[3:6]
-
-      return positions, velocities
+      return drone.physics.predict_trajectory(drone.x, u)
 
    def _debug_log_feasibility_check(self, drone: Drone, neighbor_trajectories: dict[str, tuple[np.ndarray, np.ndarray]], feasible: bool, result: OptimizeResult,
                                     traj_opt: np.ndarray, g: np.ndarray):

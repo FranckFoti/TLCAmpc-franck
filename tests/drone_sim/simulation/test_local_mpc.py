@@ -58,7 +58,7 @@ class TestLocalMPCSolver:
             controller=controller,
         )
 
-        u_opt, traj_opt, success = solver.solve(
+        u_opt, traj_opt, success, *_ = solver.solve(
             drone=drone,
             neighbor_trajectories={},
         )
@@ -80,7 +80,7 @@ class TestLocalMPCSolver:
         # Neighbor stationary at (2, 0, 0) - directly in path
         neighbor_traj = np.tile(np.array([[2.0, 0.0, 0.0]]), (5, 1))
 
-        u_opt, traj_opt, success = solver.solve(
+        u_opt, traj_opt, success, *_ = solver.solve(
             drone=drone,
             neighbor_trajectories={"neighbor-1": (neighbor_traj, None)},
         )
@@ -102,7 +102,7 @@ class TestLocalMPCSolver:
 
         obstacles = [(np.array([2.0, 0.0, 0.0]), np.array([0.5, 0.5, 0.5]))]
 
-        u_opt, traj_opt, success = solver.solve(
+        u_opt, traj_opt, success, *_ = solver.solve(
             drone=drone,
             neighbor_trajectories={},
             obstacles=obstacles,
@@ -122,7 +122,7 @@ class TestLocalMPCSolver:
         room_min = np.array([-5.0, -5.0, -5.0])
         room_max = np.array([5.0, 5.0, 5.0])
 
-        u_opt, traj_opt, success = solver.solve(
+        u_opt, traj_opt, success, *_ = solver.solve(
             drone=drone,
             neighbor_trajectories={},
             room_min=room_min,
@@ -145,7 +145,7 @@ class TestLocalMPCSolver:
         )
 
         # First solve
-        u_opt1, _, _ = solver.solve(
+        u_opt1, _, _, _ = solver.solve(
             drone=drone1,
             neighbor_trajectories={},
         )
@@ -156,7 +156,7 @@ class TestLocalMPCSolver:
             target=np.array([2.0, 0.0, 0.0]),
             controller=controller,
         )
-        u_opt2, _, success2 = solver.solve(
+        u_opt2, _, success2, _ = solver.solve(
             drone=drone2,
             neighbor_trajectories={},
             u_prev=u_opt1,
@@ -192,7 +192,7 @@ class TestLocalMPCSolver:
             (np.array([0.0, -1.0, 0.0]), np.array([0.3, 0.3, 0.3])),
         ]
 
-        u_opt, traj_opt, success = solver.solve(
+        u_opt, traj_opt, success, *_ = solver.solve(
             drone=drone,
             neighbor_trajectories={},
             obstacles=obstacles,
@@ -322,7 +322,7 @@ class TestLocalMPCSolverAdaptive:
         # Neighbor close enough to trigger constraints
         neighbor_traj = np.tile(np.array([[3.0, 0.0, 0.0]]), (5, 1))
 
-        u_opt, traj_opt, success = solver.solve(
+        u_opt, traj_opt, success, *_ = solver.solve(
             drone=drone,
             neighbor_trajectories={"neighbor-1": (neighbor_traj, None)},
         )
@@ -340,7 +340,7 @@ class TestLocalMPCSolverAdaptive:
             controller=controller,
         )
 
-        u_opt, traj_opt, success = solver.solve(
+        u_opt, traj_opt, success, *_ = solver.solve(
             drone=drone,
             neighbor_trajectories={},
         )

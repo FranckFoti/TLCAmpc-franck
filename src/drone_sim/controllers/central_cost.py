@@ -68,17 +68,21 @@ class CentralMPCAgent(Controller):
       # Allow the coordinator to choose the horizon length.
       u_seq = np.asarray(u_seq, dtype=float).reshape((-1, 3))
 
-      x = np.asarray(drone.x, dtype=float).reshape(6)
       p_ref = np.asarray(drone.route.current_ref(), dtype=float).reshape(3)
 
-      total = 0.0
-      for k in range(u_seq.shape[0]):
-         x = drone.physics.step(x, u_seq[k])
-         e = x[:3] - p_ref
-         v = x[3:]
-         total += float(e @ self._Qp @ e + v @ self._Qv @ v + u_seq[k] @ self._R @ u_seq[k])
+      positions, velocities = drone.physics.predict_trajectory(drone.x, u_seq)
 
-      return float(total)
+      errors = positions - p_ref  # (H, 3)
+      # Vectorized quadratic forms: sum of e^T Q e for diagonal Q = sum(q * e^2)
+      qp = np.diag(self._Qp)
+      qv = np.diag(self._Qv)
+      r = np.diag(self._R)
+      total = float(
+         np.sum(errors ** 2 * qp)
+         + np.sum(velocities ** 2 * qv)
+         + np.sum(u_seq ** 2 * r)
+      )
+      return total
 
    # Controller interface: when used standalone, we just apply the first step of the initial guess.
    def control(self, drone: Drone, neighbors: list[tuple[np.ndarray, np.ndarray, float, float, np.ndarray]],
@@ -102,14 +106,18 @@ class AdaptiveMPCAgent(CentralMPCAgent):
    def central_cost(self, u_seq: np.ndarray, drone: Drone) -> float:
       u_seq = np.asarray(u_seq, dtype=float).reshape((-1, 3))
 
-      x = np.asarray(drone.x, dtype=float).reshape(6)
       p_ref = np.asarray(drone.route.current_ref(), dtype=float).reshape(3)
 
-      total = 0.0
-      for k in range(u_seq.shape[0]):
-         x = drone.physics.step(x, u_seq[k])
-         e = x[:3] - p_ref
-         v = x[3:]
-         total += float(e @ self._Qp @ e + v @ self._Qv @ v + u_seq[k] @ self._R @ u_seq[k] + self.lambda_vel * float(np.dot(v, v)))
+      positions, velocities = drone.physics.predict_trajectory(drone.x, u_seq)
 
-      return float(total)
+      errors = positions - p_ref
+      qp = np.diag(self._Qp)
+      qv = np.diag(self._Qv)
+      r = np.diag(self._R)
+      total = float(
+         np.sum(errors ** 2 * qp)
+         + np.sum(velocities ** 2 * qv)
+         + np.sum(u_seq ** 2 * r)
+         + self.lambda_vel * np.sum(velocities ** 2)
+      )
+      return total

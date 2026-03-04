@@ -136,16 +136,15 @@ class DistributedMPCCoordinator:
                   for sid, msg in messages.items()
                }
 
-               # Get warm-start from previous timestep (only on first ADMM iteration)
+               # Warm-start: use previous ADMM iteration result, or previous timestep on first iteration
                u_prev = None
-               if drone_id in self._u_prev and iteration == 0:
+               if iteration > 0 and drone_id in controls:
+                  u_prev = controls[drone_id]
+               elif drone_id in self._u_prev and iteration == 0:
                   u_prev = self._u_prev[drone_id]
 
-               u_opt, traj_opt, success = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
+               u_opt, traj_opt, success, vel_opt = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
                                                        room_max=room_max, u_prev=u_prev)
-
-               # Compute predicted velocities for broadcast
-               _, vel_opt = solver._predict_states(drone, u_opt)
 
                # Immediate update (Gauss-Seidel style)
                trajectories[drone_id] = traj_opt
@@ -157,7 +156,7 @@ class DistributedMPCCoordinator:
                                        neighbor_graph=self._neighbor_graph)
          else:
             # Jacobi: all drones use stale data, update all at once
-            trajectories, controls = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max)
+            trajectories, controls = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max, prev_controls=controls)
 
          # 3c. Stagnation detection — break early if no drone made progress
          stagnated, prev_trajectories = self.is_stagneted(trajectories, prev_trajectories, opt_ids, stagnation_count, iteration)
@@ -200,10 +199,12 @@ class DistributedMPCCoordinator:
 
    def _jacobi(self, drone_order: list[str], drone_by_id: dict[str, Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
                obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None,
-               room_max: np.ndarray | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+               room_max: np.ndarray | None = None,
+               prev_controls: dict[str, np.ndarray] | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
       """Jacobi update: all drones solve using stale neighbor data, then update all at once."""
       new_trajectories: dict[str, np.ndarray] = {}
       new_controls: dict[str, np.ndarray] = {}
+      new_velocities: dict[str, np.ndarray] = {}
 
       for drone_id in drone_order:
          drone = drone_by_id[drone_id]
@@ -215,24 +216,24 @@ class DistributedMPCCoordinator:
             for sid, msg in messages.items()
          }
 
-         # Get warm-start from previous timestep (only on first ADMM iteration)
+         # Warm-start: use previous ADMM iteration result, or previous timestep on first iteration
          u_prev = None
-         if drone_id in self._u_prev and iteration == 0:
+         if iteration > 0 and prev_controls and drone_id in prev_controls:
+            u_prev = prev_controls[drone_id]
+         elif drone_id in self._u_prev and iteration == 0:
             u_prev = self._u_prev[drone_id]
 
-         u_opt, traj_opt, success = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
+         u_opt, traj_opt, success, vel_opt = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
                                                  room_max=room_max, u_prev=u_prev)
 
          new_trajectories[drone_id] = traj_opt
          new_controls[drone_id] = u_opt
+         new_velocities[drone_id] = vel_opt
 
-      # Broadcast updated trajectories with velocities
+      # Broadcast updated trajectories with velocities (no extra _predict_states call)
       for drone_id in drone_order:
-         drone = drone_by_id[drone_id]
-         solver = local_solvers[drone_id]
-         _, vel_opt = solver._predict_states(drone, new_controls[drone_id])
          self._mailbox.broadcast(sender_id=drone_id, trajectory=new_trajectories[drone_id],
-                                 predicted_velocities=vel_opt, timestamp=0,
+                                 predicted_velocities=new_velocities[drone_id], timestamp=0,
                                  neighbor_graph=self._neighbor_graph)
 
       return new_trajectories, new_controls

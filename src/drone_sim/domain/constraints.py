@@ -6,6 +6,25 @@ import numpy as np
 from drone_sim.domain.drone import Drone
 
 
+def points_to_box_dist(
+    points: np.ndarray,
+    center: np.ndarray,
+    half_extents: np.ndarray,
+    eps: float = 1e-3,
+) -> np.ndarray:
+    """Vectorized smooth point-to-box distance for multiple points.
+
+    :param points: Query points (H, 3).
+    :param center: Box center (3,).
+    :param half_extents: Box half-sizes per axis (3,).
+    :param eps: Regularization constant.
+    :return: Smooth distances (H,).
+    """
+    d = np.abs(points - center) - half_extents
+    relu_d = np.maximum(d, 0.0)
+    return np.sqrt(np.sum(relu_d ** 2, axis=1) + eps * eps) - eps
+
+
 def point_to_box_dist(
     point: np.ndarray,
     center: np.ndarray,
@@ -50,6 +69,23 @@ def _safety_radius(drone: Drone, velocity: np.ndarray | None) -> float:
    if velocity is not None and drone.is_adaptive:
       return drone.compute_adaptive_radius(velocity)
    return drone.safety_zone
+
+
+def _safety_radii(drone: Drone, pred_vel: np.ndarray | None, horizon: int) -> np.ndarray:
+   """Compute safety radii for all steps at once.
+
+   :param drone: the drone.
+   :param pred_vel: predicted velocities (H, 3) or None.
+   :param horizon: number of steps.
+   :return: safety radii array (H,).
+   """
+   if pred_vel is not None and drone.is_adaptive:
+      speeds = np.linalg.norm(pred_vel[:horizon], axis=1)
+      u_min, u_max = drone.bounds()
+      u_max_scalar = float(np.max(np.abs(u_max)))
+      s_stop = speeds ** 2 / (2.0 * u_max_scalar)
+      return drone.safety_zone + drone.alpha * s_stop
+   return np.full(horizon, drone.safety_zone)
 
 
 class MPCConstraints(ABC):
@@ -151,12 +187,10 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
             vel_i = pred_vel[drone_i.drone_id] if pred_vel is not None else None
             vel_j = pred_vel[drone_j.drone_id] if pred_vel is not None else None
 
-            result = np.zeros(self._horizon)
-            for step in range(self._horizon):
-               safety_i = _safety_radius(drone_i, _velocity_at_step(vel_i, step))
-               safety_j = _safety_radius(drone_j, _velocity_at_step(vel_j, step))
-               dist = float(np.linalg.norm(traj_i[step] - traj_j[step]))
-               result[step] = dist - (safety_i + safety_j + drone_i.cons_stop + drone_j.cons_stop)
+            dists = np.linalg.norm(traj_i - traj_j, axis=1)
+            radii_i = _safety_radii(drone_i, vel_i, self._horizon)
+            radii_j = _safety_radii(drone_j, vel_j, self._horizon)
+            result = dists - (radii_i + radii_j + drone_i.cons_stop + drone_j.cons_stop)
             parts.append(result)
       return np.concatenate([values, *parts])
 
@@ -179,14 +213,12 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       :return: constraint margin array.
       """
       parts = []
+      ego_radii = _safety_radii(drone, pred_vel, self._horizon)
       for neighbor_traj, neighbor_vel in neighbor_trajectories.values():
          neighbor_traj = np.asarray(neighbor_traj, dtype=float).reshape((self._horizon, 3))
-         result = np.zeros(self._horizon)
-         for step in range(self._horizon):
-            safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
-            neighbor_safety = _safety_radius(drone, _velocity_at_step(neighbor_vel, step))
-            dist = float(np.linalg.norm(pred_pos[step] - neighbor_traj[step]))
-            result[step] = dist - (safety + neighbor_safety)
+         dists = np.linalg.norm(pred_pos - neighbor_traj, axis=1)
+         neighbor_radii = _safety_radii(drone, neighbor_vel, self._horizon)
+         result = dists - (ego_radii + neighbor_radii)
          parts.append(result)
       if not parts:
          return np.zeros(0)
@@ -262,14 +294,12 @@ class ObstacleAvoidanceConstraints(MPCConstraints):
       :return: constraint margin array.
       """
       parts = []
+      radii = _safety_radii(drone, pred_vel, self._horizon)
       for center, half_extents in obstacles:
          obstacle_center = np.asarray(center, dtype=float).reshape(3)
          obstacle_half_extents = np.asarray(half_extents, dtype=float).reshape(3)
-         row = np.zeros(self._horizon)
-         for step in range(self._horizon):
-            safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
-            dist = point_to_box_dist(pred_pos[step], obstacle_center, obstacle_half_extents)
-            row[step] = dist - safety
+         dists = points_to_box_dist(pred_pos, obstacle_center, obstacle_half_extents)
+         row = dists - radii
          parts.append(row)
       if not parts:
          return np.zeros(self._horizon)
@@ -359,17 +389,19 @@ class RoomConstraints(MPCConstraints):
    ) -> np.ndarray:
       lower_bounds = np.asarray(room_min, dtype=float).reshape(3)
       upper_bounds = np.asarray(room_max, dtype=float).reshape(3)
-      result = np.zeros(self._horizon * 6)
-      count = 0
-      for step in range(self._horizon):
-         pos = pred_pos[step]
-         safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
-         for axis in range(3):
-            result[count] = float(pos[axis] - safety - lower_bounds[axis]) + self._wall_tolerance
-            count += 1
-         for axis in range(3):
-            result[count] = float(upper_bounds[axis] - (pos[axis] + safety)) + self._wall_tolerance
-            count += 1
+      radii = _safety_radii(drone, pred_vel, self._horizon)  # (H,)
+      # pred_pos is (H, 3), radii is (H,) -> radii[:, None] is (H, 1)
+      radii_col = radii[:, np.newaxis]
+      lower_part = pred_pos - radii_col - lower_bounds + self._wall_tolerance  # (H, 3)
+      upper_part = upper_bounds - (pred_pos + radii_col) + self._wall_tolerance  # (H, 3)
+      # Interleave: for each step, 3 lower then 3 upper
+      result = np.empty(self._horizon * 6, dtype=float)
+      result[0::6] = lower_part[:, 0]
+      result[1::6] = lower_part[:, 1]
+      result[2::6] = lower_part[:, 2]
+      result[3::6] = upper_part[:, 0]
+      result[4::6] = upper_part[:, 1]
+      result[5::6] = upper_part[:, 2]
       return result
 
    def _evaluate_sphere(
@@ -379,9 +411,6 @@ class RoomConstraints(MPCConstraints):
       room_radius: float,
       pred_vel: np.ndarray | None = None,
    ) -> np.ndarray:
-      result = np.zeros(self._horizon)
-      for step in range(self._horizon):
-         dist = float(np.linalg.norm(pred_pos[step]))
-         safety = _safety_radius(drone, _velocity_at_step(pred_vel, step))
-         result[step] = room_radius - dist - safety
-      return result
+      dists = np.linalg.norm(pred_pos[:self._horizon], axis=1)
+      radii = _safety_radii(drone, pred_vel, self._horizon)
+      return room_radius - dists - radii

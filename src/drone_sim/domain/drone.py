@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeAlias
 
 import numpy as np
@@ -57,6 +57,9 @@ class Drone:
    # safety radius instead of the fixed safety_zone.
    alpha: float | None = None
 
+   # Cached u_max_scalar for adaptive radius computation (set lazily)
+   _cached_u_max_scalar: float | None = field(default=None, init=False, repr=False)
+
    @property
    def is_adaptive(self) -> bool:
       """Whether this drone uses velocity-dependent adaptive safety zones."""
@@ -91,12 +94,12 @@ class Drone:
       :param velocity: velocity norm
       :return:
       """
-      u_min, u_max = self.bounds()
-      u_max_scalar = float(np.max(np.abs(u_max)))
-      v_norm_sq = float(np.dot(velocity, velocity))  # np.linalg.norm(velocity) ** 2
-      s_stop = v_norm_sq / (2.0 * u_max_scalar)
-      # print(f"v: {velocity}, v_norm_sq: {v_norm_sq}, u_max_scalar: {u_max_scalar}, s_stop: {s_stop} -> {self.safety_zone + self.alpha * s_stop}")
-      return self.safety_zone + self.alpha * s_stop  # return max(self.safety_zone, self.safety_zone + self.alpha * s_stop) # safety_zone is r_min for the adaptive case, maybe we have to change to something like r_min!!!  # u_max_scalar = float(np.max(np.abs(u_max))) #TODO check! ich glaube so ists richtig... # float(np.min(np.abs(u_max))) # TODO: check if this is correct: wanted is longest break way ... u_max? should be abs(u_min) ... np.abs(np.min(u_min))?
+      if self._cached_u_max_scalar is None:
+         _, u_max = self.bounds()
+         self._cached_u_max_scalar = float(np.max(np.abs(u_max)))
+      v_norm_sq = velocity * velocity
+      s_stop = v_norm_sq / (2.0 * self._cached_u_max_scalar)
+      return self.safety_zone + self.alpha * s_stop
 
    def predict(self, u: np.ndarray) -> np.ndarray:
       return self.physics.step(self.x, u)

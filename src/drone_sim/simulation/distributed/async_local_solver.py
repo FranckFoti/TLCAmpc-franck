@@ -149,7 +149,7 @@ class AsyncLocalSolver:
             }
 
             # Solve MPC
-            u_opt, traj_opt, success = self.solver.solve(
+            u_opt, traj_opt, success, vel_opt = self.solver.solve(
                 drone=self.drone,
                 neighbor_trajectories=neighbor_trajectories,
                 obstacles=obstacles,
@@ -162,7 +162,7 @@ class AsyncLocalSolver:
                 _log.warning("Solver failed for %s at iteration %d", self.drone.drone_id, self.iteration_count)
 
             # Broadcast trajectory to neighbors
-            self._broadcast_trajectory(u_opt, traj_opt)
+            self._broadcast_trajectory(u_opt, traj_opt, vel_opt)
 
             # Update warm-start state
             self.u_prev = u_opt
@@ -224,6 +224,7 @@ class AsyncLocalSolver:
         self,
         u_opt: np.ndarray,
         traj_opt: np.ndarray,
+        vel_opt: np.ndarray | None = None,
     ) -> None:
         """Broadcast optimized trajectory to neighbors.
 
@@ -232,12 +233,14 @@ class AsyncLocalSolver:
 
         :param u_opt: Optimized control sequence (H, 3)
         :param traj_opt: Optimized position trajectory (H, 3)
+        :param vel_opt: Predicted velocities (H, 3), or None to recompute
         """
         # Get neighbor IDs from neighbor graph
         neighbor_ids = self.neighbor_graph.get_neighbors(self.drone.drone_id)
 
-        # Compute predicted velocities using solver's predict method
-        _, vel_opt = self.solver._predict_states(self.drone, u_opt)
+        # Use provided velocities or recompute if not available
+        if vel_opt is None:
+            _, vel_opt = self.solver._predict_states(self.drone, u_opt)
 
         # Create trajectory message with monotonic timestamp
         message = TrajectoryMessage(
