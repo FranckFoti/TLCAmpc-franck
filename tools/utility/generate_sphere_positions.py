@@ -7,6 +7,17 @@ import numpy as np
 
 from tools.utility import constants
 
+class DronePlacementError(RuntimeError):
+   """Exception raised when drone placement fails."""
+
+   def __init__(self, n_drones: int, r_room: float, r_sphere: float, message: str|None=None):
+      self.n_drones = n_drones
+      self.r_room = r_room
+      self.r_sphere = r_sphere
+      self.message = f'Failed to place {n_drones} drones with r_room={r_room} and r_sphere={r_sphere}' if message is None else message
+      super().__init__(self.message)
+
+
 # Type alias for the public API return type
 StartDestPattern = list[tuple[list[float], list[float]]]
 
@@ -182,12 +193,12 @@ def generate_positions(n_drones: int, room_min: list[float] = list, room_max: li
       results = _generate_positions_in_sphere(n_drones=n_drones, r_sphere=min_pair_distance / 2, r_room=r_room, max_attempts=max_attempts)
       if results is None:
          print("RUN IN FALLBACK, without having any")
-         raise RuntimeError(f"Failed to place {n_drones} drones with d_min={min_pair_distance} and r_room={r_room} after {max_attempts} attempts.")
+         raise DronePlacementError(n_drones=n_drones, r_room=r_room, r_sphere=min_pair_distance / 2)
       return results
 
    results = _generate_positions_in_box(n_drones, np.array(room_min), np.array(room_max), min_pair_distance, wall_margin, max_attempts)
    if results is None:
-      raise RuntimeError(f"Failed to place {n_drones} drones with d_min={min_pair_distance} after {max_attempts} attempts.")
+      raise DronePlacementError(n_drones=n_drones, r_room=r_room, r_sphere=min_pair_distance / 2)
    return results
 
 

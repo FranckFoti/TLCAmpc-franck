@@ -1,5 +1,5 @@
 from drone_sim.domain.config import ControllerSpec, PhysicsSpec, RoomConfig, ScenarioConfig, DroneConfig, ObstacleConfig
-from tools.utility.constants import COLOR_BY_DRONE_INDEX
+from tools.utility import COLOR_BY_DRONE_INDEX
 from tools.utility.generate_sphere_positions import generate_positions
 
 

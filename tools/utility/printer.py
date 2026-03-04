@@ -11,6 +11,7 @@ class Status(StrEnum):
    FINISHED = "finished"
    MAX_STEPS = "max_steps"
    INFEASIBLE = "infeasible"
+   NO_POSSIBLE_PLACEMENT = "no_possible_placement"
    ERROR = "error"
    TIMEOUT = "timeout"
 

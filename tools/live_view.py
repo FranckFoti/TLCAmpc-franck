@@ -19,6 +19,7 @@ from drone_sim.api.render import render_png
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
 from drone_sim.simulation.distributed.distributed_coordinator import DistributedMPCCoordinator
+from tools.utility import DronePlacementError
 from tools.utility.scenario_creator import create_scenario
 from drone_sim.domain.utils.helper import all_drones_reached_destination
 
@@ -43,7 +44,7 @@ def load_parametrized_json(path: str | Path, params: dict[str, str] | None = Non
       text = Template(text).safe_substitute(params)
    return json.loads(text)
 
-def create_scenario(config_path: str | Path | None, params: dict[str, str] | None) -> ScenarioConfig:
+def _create_scenario(config_path: str | Path | None, params: dict[str, str] | None) -> ScenarioConfig:
    if not config_path:
       # Get N and H from param and load default values
       num_str = params.get("num_drones")
@@ -51,7 +52,10 @@ def create_scenario(config_path: str | Path | None, params: dict[str, str] | Non
       if num_str is None or hor_str is None:
          _die("When --config has no path, you must provide both num_drones=<int> and horizon=<int> via --param.")
 
-      scenario = create_scenario(n_drones=int(num_str), horizon=int(hor_str))
+      try:
+         scenario = create_scenario(n_drones=int(num_str), horizon=int(hor_str))
+      except DronePlacementError as e:
+         _die(f"Failed to create scenario: {e}")
    else:
       # Load raw JSON (with optional template substitution) and validate as ScenarioConfig.
       cfg_json = load_parametrized_json(config_path, params=params)
@@ -67,7 +71,7 @@ def create_scenario(config_path: str | Path | None, params: dict[str, str] | Non
 
 def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | None, steps: int, step_n: int, sleep_s: float, trace_len: int,
                   width: int, height: int, dpi: int, elev: float, azim: float, record_dir: str | Path | None, gif_path: str | Path | None, gif_fps: float) -> None:
-   scenario = create_scenario(config_path=config_path, params=params)
+   scenario = _create_scenario(config_path=config_path, params=params)
 
    sim = Simulator.from_config(scenario)
 

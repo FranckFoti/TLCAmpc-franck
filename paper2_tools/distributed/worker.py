@@ -15,7 +15,6 @@ import argparse
 import gc
 import logging
 import multiprocessing
-import time
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 
 from paper2_tools.distributed.config import HORIZON, DT, ALPHA, MAX_STEPS, TRACE_LEN, TIMEOUT_MS
@@ -28,6 +27,7 @@ def _run_one_task(v_max: float, u_max: float, room_size: float, alpha: float,
                   static_safety_zone: float, adaptive_safety_zone: float, r_min: float) -> bool:
     """Claim and execute a single task. Returns True if a task was processed, False if queue empty."""
     # Import simulation code inside the worker process to avoid PySide6 issues in main process
+    from tools.utility import DronePlacementError, Status
     from tools.utility.scenario_creator import create_scenario
     from tools.horizon_live_view_grid import run_single_scenario, print_results_prep
 
@@ -69,6 +69,12 @@ def _run_one_task(v_max: float, u_max: float, room_size: float, alpha: float,
         mark_done(task_id)
         logger.info("Task %d completed: status=%s, wall_time=%.1fs", task_id, status, wall_time)
 
+    except DronePlacementError as e:
+        logger.exception("Task %d infeasible: %s", task_id, e)
+        _, row = print_results_prep(all_pair_dists=[0.0], jerk_3d_value=0.0, num_drones=n_drones, status=Status.NO_POSSIBLE_PLACEMENT, step_durations=[0.0],
+              step_mean_pair_dists=[0.0], wall_time=0.0, coordinator_type=coordinator, controller_type=controller, horizon=HORIZON)
+        insert_metrics(task_id, row)
+        mark_done(task_id)
     except Exception as e:
         logger.exception("Task %d failed: %s", task_id, e)
         mark_error(task_id, str(e)[:500])
