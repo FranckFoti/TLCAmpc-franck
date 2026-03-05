@@ -210,7 +210,7 @@ class TestLocalMPCSolverInit:
         solver = LocalMPCSolver(dt=0.1, horizon=5)
         assert solver.dt == 0.1
         assert solver.horizon == 5
-        assert solver.max_iter == 100
+        assert solver.max_iter == 50
         assert solver.f_tol == 1e-4
 
     def test_init_custom_values(self):

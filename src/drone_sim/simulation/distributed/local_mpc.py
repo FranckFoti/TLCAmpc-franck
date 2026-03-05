@@ -40,7 +40,7 @@ class LocalMPCSolver:
    horizon: int
 
    # Optimizer settings
-   max_iter: int = 100
+   max_iter: int = 50
    f_tol: float = 1e-4
    symmetry_break_eps: float = 0.05  # Random noise magnitude for symmetry breaking
 
@@ -87,23 +87,51 @@ class LocalMPCSolver:
       obstacle_c = ObstacleAvoidanceConstraints(horizon=horizon)
       room_c = RoomConstraints(horizon=horizon) if room_min is not None and room_max is not None else None
 
+      # Extract cost weights for inline computation (avoids redundant predict_trajectory in central_cost)
+      qp = np.diag(controller._Qp)  # (3,)
+      qv = np.diag(controller._Qv)  # (3,)
+      r = np.diag(controller._R)    # (3,)
+      lambda_vel = getattr(controller, 'lambda_vel', 0.0)
+      p_ref = np.asarray(drone.route.current_ref(), dtype=float).reshape(3)
+
+      # Shared prediction cache: cost() and constraints() are called with the same u_flat
+      # by SLSQP on each iteration, so we cache to avoid duplicate predict_trajectory calls.
+      _cache_u = [None]
+      _cache_result = [None]
+
+      def _predict_cached(u_flat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+         if _cache_u[0] is None or not np.array_equal(u_flat, _cache_u[0]):
+            _cache_u[0] = u_flat.copy()
+            _cache_result[0] = self._predict_states(drone, u_flat.reshape((horizon, 3)))
+         return _cache_result[0]
+
       def cost(u_flat: np.ndarray) -> float:
+         positions, velocities = _predict_cached(u_flat)
          u = u_flat.reshape((horizon, 3))
-         u = np.clip(u, u_min, u_max)
-         return controller.central_cost(u, drone)
+         errors = positions - p_ref
+         return float(
+            np.sum(errors ** 2 * qp)
+            + np.sum(velocities ** 2 * qv)
+            + np.sum(u ** 2 * r)
+            + lambda_vel * np.sum(velocities ** 2)
+         )
 
       def constraints(u_flat: np.ndarray) -> np.ndarray:
-         u = u_flat.reshape((horizon, 3))
-         u = np.clip(u, u_min, u_max)
-         predicted_positions, predicted_velocities = self._predict_states(drone, u)
+         positions, velocities = _predict_cached(u_flat)
 
-         vals = np.array([], dtype=float)
-         vals = collision_c.evaluate_single(drone, predicted_positions, neighbor_trajectories, vals, pred_vel=predicted_velocities)
-         vals = obstacle_c.evaluate_single(drone, predicted_positions, obstacles, vals, pred_vel=predicted_velocities)
+         parts = []
+         c = collision_c.evaluate_single(drone, positions, neighbor_trajectories, np.empty(0), pred_vel=velocities)
+         if len(c) > 0:
+            parts.append(c)
+         c = obstacle_c.evaluate_single(drone, positions, obstacles, np.empty(0), pred_vel=velocities)
+         if len(c) > 0:
+            parts.append(c)
          if room_c is not None:
-            vals = room_c.evaluate_single(drone, predicted_positions, room_max, room_min, vals, pred_vel=predicted_velocities)
+            c = room_c.evaluate_single(drone, positions, room_max, room_min, np.empty(0), pred_vel=velocities)
+            if len(c) > 0:
+               parts.append(c)
 
-         return vals
+         return np.concatenate(parts) if parts else np.array([], dtype=float)
 
       # Build bounds
       axis_bounds = [(float(u_min[a]), float(u_max[a])) for a in range(3)]
