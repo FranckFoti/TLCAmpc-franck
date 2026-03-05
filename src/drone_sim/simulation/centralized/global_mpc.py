@@ -141,17 +141,22 @@ class GlobalMPCSolver:
       """Log per-category constraint margins. Violations always logged at WARNING."""
       bd = self._constraint_breakdown(u_flat, drones=drones, obstacles=obstacles, room_min=room_min, room_max=room_max)
 
-      for label, margins in bd["collision"].items():
+      for label, margins in bd.get("collision", {}).items():
          msg = f"  collision {label}: min={margins.min():.3e}  per-step={np.round(margins, 4).tolist()}"
          if margins.min() < 0:
             _log.warning(msg)
 
-      for drone_id, margins in bd["room"].items():
+      for label, margins in bd.get("obstacle", {}).items():
+         msg = f"  obstacle {label}: min={margins.min():.3e}  per-step={np.round(margins, 4).tolist()}"
+         if margins.min() < 0:
+            _log.warning(msg)
+
+      for drone_id, margins in bd.get("room", {}).items():
          msg = f"  room     {drone_id}: min={margins.min():.3e}"
          if margins.min() < 0:
             _log.warning(msg)
 
-      for drone_id, margins in bd["velocity"].items():
+      for drone_id, margins in bd.get("velocity", {}).items():
          msg = f"  velocity {drone_id}: min={margins.min():.3e}"
          if margins.min() < 0:
             _log.warning(msg)
