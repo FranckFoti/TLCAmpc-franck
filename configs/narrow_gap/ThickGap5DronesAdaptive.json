@@ -1,0 +1,100 @@
+{
+  "dt": 0.1,
+  "room": {"min": [-20, -5, -5], "max": [18, 5, 5]},
+
+  "physics": [
+    {
+      "id": "standard",
+      "type": "linear_kinematics",
+      "params": {
+        "v_max": 2.5,
+        "u_min": [-3.0, -3.0, -3.0],
+        "u_max": [3.0, 3.0, 3.0]
+      }
+    }
+  ],
+
+  "controller": {
+    "type": "mpc_agent_adaptive",
+    "params": {
+      "horizon": 8,
+      "lambda_vel": 1.0,
+      "q_pos": [2.0, 2.0, 2.0],
+      "q_vel": [1.0, 1.0, 1.0],
+      "r_u": [0.5, 0.5, 0.5]
+    }
+  },
+
+  "coordinator": {
+    "type": "mpc_central",
+    "params": {
+      "horizon": 8,
+      "max_iter": 100
+    }
+  },
+
+  "obstacles": [
+    {"center": [0.0,  3.275, 0.0],  "half_extents": [1.0, 1.725, 5.0]},
+    {"center": [0.0, -3.275, 0.0],  "half_extents": [1.0, 1.725, 5.0]},
+    {"center": [0.0,  0.0,  3.275], "half_extents": [1.0, 1.55, 1.725]},
+    {"center": [0.0,  0.0, -3.275], "half_extents": [1.0, 1.55, 1.725]}
+  ],
+
+  "drones": [
+    {
+      "drone_id": "drone-1",
+      "physics": "standard",
+      "start":  [-5.0, 0.0, 0.0],
+      "target": [15.4, 0.0, 0.0],
+      "radius": 0.4,
+      "safety_zone": 1.0,
+      "cons_stop": 0.0,
+      "alpha": 0.5,
+      "drone_color": "#00FFFF"
+    },
+    {
+      "drone_id": "drone-2",
+      "physics": "standard",
+      "start":  [-8.0, -2.2, -2.2],
+      "target": [12.3, 0.0, 0.0],
+      "radius": 0.4,
+      "safety_zone": 1.0,
+      "cons_stop": 0.0,
+      "alpha": 0.5,
+      "drone_color": "#FF4500"
+    },
+    {
+      "drone_id": "drone-3",
+      "physics": "standard",
+      "start":  [-11.0, 2.2, -2.2],
+      "target": [9.2, 0.0, 0.0],
+      "radius": 0.4,
+      "safety_zone": 1.0,
+      "cons_stop": 0.0,
+      "alpha": 0.5,
+      "drone_color": "#800080"
+    },
+    {
+      "drone_id": "drone-4",
+      "physics": "standard",
+      "start":  [-14.0, -2.2, 2.2],
+      "target": [6.1, 0.0, 0.0],
+      "radius": 0.4,
+      "safety_zone": 1.0,
+      "cons_stop": 0.0,
+      "alpha": 0.5,
+      "drone_color": "#32CD32"
+    },
+    {
+      "drone_id": "drone-5",
+      "physics": "standard",
+      "start":  [-18.0, 2.2, 2.2],
+      "target": [3.0, 0.0, 0.0],
+      "radius": 0.4,
+      "safety_zone": 1.0,
+      "cons_stop": 0.0,
+      "alpha": 0.5,
+      "drone_color": "#FFD700"
+    }
+  ]
+}
