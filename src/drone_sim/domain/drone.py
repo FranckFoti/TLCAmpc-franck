@@ -80,24 +80,24 @@ class Drone:
       return self._compute_adaptive_radius_impl(float(np.linalg.norm(velocity)))
 
    def compute_max_adaptive_radius(self) -> float:
-      """ returns the maximum adaptive radius for the drone
+      """Return the maximum adaptive radius for the drone.
 
-      :return: maximum adaptive radius
+      :return: maximum adaptive radius.
       """
       if not self.is_adaptive:
          return self.safety_zone
       return self._compute_adaptive_radius_impl(self.v_max)
 
-   def _compute_adaptive_radius_impl(self, velocity: float) -> float:
-      """ do calculation with the scalar of the velocity vector
+   def _compute_adaptive_radius_impl(self, speed: float) -> float:
+      """Compute adaptive radius from the speed (velocity magnitude).
 
-      :param velocity: velocity norm
-      :return:
+      :param speed: scalar speed (norm of velocity vector).
+      :return: adaptive safety radius.
       """
       if self._cached_u_max_scalar is None:
          _, u_max = self.bounds()
          self._cached_u_max_scalar = float(np.max(np.abs(u_max)))
-      v_norm_sq = velocity * velocity
+      v_norm_sq = speed * speed
       s_stop = v_norm_sq / (2.0 * self._cached_u_max_scalar)
       return self.safety_zone + self.alpha * s_stop
 

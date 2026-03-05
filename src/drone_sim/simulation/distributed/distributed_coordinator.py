@@ -137,15 +137,11 @@ class DistributedMPCCoordinator:
                   for sid, msg in messages.items()
                }
 
-               # Warm-start: use previous ADMM iteration result, or previous timestep on first iteration
-               u_prev = None
-               if iteration > 0 and drone_id in controls:
-                  u_prev = controls[drone_id]
-               elif drone_id in self._u_prev and iteration == 0:
-                  u_prev = self._u_prev[drone_id]
-
-               u_opt, traj_opt, success, vel_opt = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
-                                                       room_max=room_max, u_prev=u_prev)
+               u_prev = self._warm_start_controls(drone_id, iteration, controls)
+               u_opt, traj_opt, success, vel_opt = solver.solve(
+                  drone=drone, neighbor_trajectories=neighbor_trajectories,
+                  obstacles=obstacles, room_min=room_min, room_max=room_max, u_prev=u_prev,
+               )
 
                # Immediate update (Gauss-Seidel style)
                trajectories[drone_id] = traj_opt
@@ -161,7 +157,9 @@ class DistributedMPCCoordinator:
             trajectories, controls, velocities = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max, prev_controls=controls)
 
          # 3c. Stagnation detection — break early if no drone made progress
-         stagnated, prev_trajectories = self.is_stagneted(trajectories, prev_trajectories, opt_ids, stagnation_count, iteration)
+         stagnated, prev_trajectories, stagnation_count = self._check_stagnation(
+            trajectories, prev_trajectories, opt_ids, stagnation_count, iteration,
+         )
          if stagnated:
             break
 
@@ -199,6 +197,23 @@ class DistributedMPCCoordinator:
 
       return result
 
+   def _warm_start_controls(self, drone_id: str, iteration: int, controls: dict[str, np.ndarray]) -> np.ndarray | None:
+      """Pick the best warm-start control sequence for a drone.
+
+      On the first ADMM iteration, reuses the previous timestep's solution.
+      On subsequent iterations, reuses the current timestep's last solve.
+
+      :param drone_id: ID of the drone.
+      :param iteration: Current ADMM iteration index (0-based).
+      :param controls: Controls computed so far in the current timestep.
+      :return: Warm-start control sequence (H, 3), or None.
+      """
+      if iteration > 0 and drone_id in controls:
+         return controls[drone_id]
+      if iteration == 0 and drone_id in self._u_prev:
+         return self._u_prev[drone_id]
+      return None
+
    def _jacobi(self, drone_order: list[str], drone_by_id: dict[str, Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
                obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None,
                room_max: np.ndarray | None = None,
@@ -218,15 +233,11 @@ class DistributedMPCCoordinator:
             for sid, msg in messages.items()
          }
 
-         # Warm-start: use previous ADMM iteration result, or previous timestep on first iteration
-         u_prev = None
-         if iteration > 0 and prev_controls and drone_id in prev_controls:
-            u_prev = prev_controls[drone_id]
-         elif drone_id in self._u_prev and iteration == 0:
-            u_prev = self._u_prev[drone_id]
-
-         u_opt, traj_opt, success, vel_opt = solver.solve(drone=drone, neighbor_trajectories=neighbor_trajectories, obstacles=obstacles, room_min=room_min,
-                                                 room_max=room_max, u_prev=u_prev)
+         u_prev = self._warm_start_controls(drone_id, iteration, prev_controls or {})
+         u_opt, traj_opt, success, vel_opt = solver.solve(
+            drone=drone, neighbor_trajectories=neighbor_trajectories,
+            obstacles=obstacles, room_min=room_min, room_max=room_max, u_prev=u_prev,
+         )
 
          new_trajectories[drone_id] = traj_opt
          new_controls[drone_id] = u_opt
@@ -254,7 +265,17 @@ class DistributedMPCCoordinator:
          self._admm_state.update_z(pair, traj_i, traj_j, min_dist)
          self._admm_state.update_lambda(pair, traj_i, traj_j)
 
-   def is_stagneted(self, trajectories: dict[str, np.ndarray], prev_trajectories: dict[str, np.ndarray], opt_ids: list[str], stagnation_count: int, iteration: int):
+   def _check_stagnation(self, trajectories: dict[str, np.ndarray], prev_trajectories: dict[str, np.ndarray],
+                          opt_ids: list[str], stagnation_count: int, iteration: int) -> tuple[bool, dict[str, np.ndarray], int]:
+      """Check whether ADMM has stagnated (no meaningful trajectory progress).
+
+      :param trajectories: Current trajectories for all drones.
+      :param prev_trajectories: Trajectories from the previous iteration.
+      :param opt_ids: IDs of drones being optimized.
+      :param stagnation_count: Running count of consecutive stagnant iterations.
+      :param iteration: Current ADMM iteration index.
+      :return: (stagnated, updated_prev_trajectories, updated_stagnation_count).
+      """
       max_change = max(float(np.linalg.norm(trajectories[did] - prev_trajectories[did])) for did in opt_ids)
       if max_change < self.primal_tol:
          stagnation_count += 1
@@ -265,8 +286,8 @@ class DistributedMPCCoordinator:
       if stagnation_count >= self.stagnation_limit:
          warnings.warn(f"ADMM stagnated after {iteration + 1} iterations — no drone made meaningful trajectory progress for {self.stagnation_limit} "
                        f"consecutive iterations", RuntimeWarning, stacklevel=2)
-         return True, prev_trajectories
-      return False, prev_trajectories
+         return True, prev_trajectories, stagnation_count
+      return False, prev_trajectories, stagnation_count
 
    def init_trajectories(self, drones: list[Drone]) -> tuple[dict[str, np.ndarray], dict[str, LocalMPCSolver]]:
       # Initialize trajectories (use warm-start if available)
@@ -358,17 +379,6 @@ class DistributedMPCCoordinator:
          return np.array([drone.compute_adaptive_radius(velocities[step])
                           for step in range(self.horizon)])
       return np.full(self.horizon, drone.safety_zone)
-
-   def _get_velocity_from_messages(self, sender_id: str, any_receiver_id: str) -> np.ndarray | None:
-      """Get a drone's predicted velocities from its broadcast messages.
-
-      :param sender_id: the drone whose velocities we want
-      :param any_receiver_id: any neighbor of the sender to look up the message
-      :return: predicted velocities (H, 3) or None
-      """
-      msgs = self._mailbox.receive(any_receiver_id)
-      msg = msgs.get(sender_id)
-      return msg.predicted_velocities if msg is not None else None
 
    def _debug_log_status(self, iteration: int, converged: bool, stagnated: bool, primal_res: float, dual_res: float,
                          drones: list[Drone], trajectories: dict[str, np.ndarray], controls: dict[str, np.ndarray]):

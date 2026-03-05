@@ -87,7 +87,6 @@ class LocalMPCSolver:
       obstacle_c = ObstacleAvoidanceConstraints(horizon=horizon)
       room_c = RoomConstraints(horizon=horizon) if room_min is not None and room_max is not None else None
       velocity_c = VelocityConstraints(horizon=horizon)
-
       # Extract cost weights for inline computation (avoids redundant predict_trajectory in central_cost)
       qp = np.diag(controller._Qp)  # (3,)
       qv = np.diag(controller._Qv)  # (3,)
@@ -136,8 +135,9 @@ class LocalMPCSolver:
             if len(c) > 0:
                parts.append(c)
          # Velocity constraints to enforce v_max via SLSQP
-         speed_sq = np.sum(velocities[:horizon] ** 2, axis=1)
-         parts.append(drone.v_max ** 2 - speed_sq)
+         vel_g = velocity_c.evaluate_single(drone, velocities, np.array([], dtype=float))
+         if len(vel_g) > 0:
+            parts.append(vel_g)
 
          g = np.concatenate(parts) if parts else np.array([], dtype=float)
          _cache_g[0] = g
@@ -202,7 +202,11 @@ class LocalMPCSolver:
          return u_zero, traj_zero, vel_zero, True
 
       # All fallbacks failed — pick the least-violating option
-      options = [(u_opt, traj_opt, None, constraints_fn(u_opt.flatten())), (u_decel, traj_decel, vel_decel, g_decel), (u_zero, traj_zero, vel_zero, g_zero), ]
+      options = [
+         (u_opt, traj_opt, None, constraints_fn(u_opt.flatten())),
+         (u_decel, traj_decel, vel_decel, g_decel),
+         (u_zero, traj_zero, vel_zero, g_zero),
+      ]
       best_u, best_traj, best_vel, _ = max(options, key=lambda o: o[3].min() if len(o[3]) else 0.0)
       if best_vel is None:
          _, best_vel = self._predict_states(drone, best_u)
