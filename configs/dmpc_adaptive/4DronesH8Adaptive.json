@@ -16,67 +16,64 @@
   "controller": {
     "type": "mpc_agent_adaptive",
     "params": {
-      "lambda_vel": 0.5,
-      "horizon": 8
+      "horizon": 4,
+      "q_pos": [2.0, 2.0, 2.0],
+      "q_vel": [1.0, 1.0, 1.0],
+      "r_u": [0.5, 0.5, 0.5]
     }
   },
 
   "coordinator": {
     "type": "mpc_central",
     "params": {
-      "horizon": 8,
-      "room_wall_tolerance": 0.5
+      "horizon": 4
     }
   },
 
   "drones": [
     {
       "drone_id": "drone-1",
-      "physics": "standard",
-      "start": [-2.0, 0.0, 0.0],
-      "target": [2.0, 0.0, 0.0],
-      "radius": 0.6,
-
-
-      "alpha": 0.4,
+      "start": [-0.146, -1.175, -0.504],
+      "target": [0.146, 1.175, 0.504],
+      "radius": 0.2,
+      "safety_zone": 0.6,
       "cons_stop": 0.0,
-      "drone_color": "#00FFFF"
+      "drone_color": "#00FFFF",
+      "physics": "default",
+      "alpha": 0.3
     },
     {
       "drone_id": "drone-2",
-      "physics": "standard",
-      "start": [2.0, 0.0, 0.0],
-      "target": [-2.0, 0.0, 0.0],
-      "radius": 0.6,
-
-
-      "alpha": 0.4,
+      "start": [0.022, 1.212, -1.095],
+      "target": [-0.022, -1.212, 1.095],
+      "radius": 0.2,
+      "safety_zone": 0.6,
       "cons_stop": 0.0,
-      "drone_color": "#800080"
+      "drone_color": "#800080",
+      "physics": "default",
+      "alpha": 0.3
     },
     {
       "drone_id": "drone-3",
-      "physics": "standard",
-      "start": [0.0, -2.0, 0.0],
-      "target": [0.0, 2.0, 0.0],
-      "radius": 0.6,
-
-
-      "alpha": 0.4,
+      "start": [0.881, 0.113, 1.299],
+      "target": [-0.881, -0.113, -1.299],
+      "radius": 0.2,
+      "safety_zone": 0.6,
       "cons_stop": 0.0,
-      "drone_color": "#DC143C"
+      "drone_color": "#DC143C",
+      "physics": "default",
+      "alpha": 0.3
     },
     {
       "drone_id": "drone-4",
-      "physics": "standard",
-      "start": [0.0, 2.0, 0.0],
-      "target": [0.0, -2.0, 0.0],
-      "radius": 0.6,
-
-
-      "alpha": 0.4,
+      "start": [-1.148, 0.721, 1.055],
+      "target": [1.148, -0.721, -1.055],
+      "radius": 0.2,
+      "safety_zone": 0.6,
       "cons_stop": 0.0,
-      "drone_color": "#008B8B"
+      "drone_color": "#008B8B",
+      "physics": "default",
+      "alpha": 0.3
     }
   ]
 }

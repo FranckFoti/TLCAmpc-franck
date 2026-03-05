@@ -70,7 +70,7 @@
       "drone_id": "drone-4",
       "start": [-1.148, 0.721, 1.055],
       "target": [1.148, -0.721, -1.055],
-      "radiu s": 0.2,
+      "radius": 0.2,
       "safety_zone": 0.6,
       "cons_stop": 0.0,
       "drone_color": "#008B8B",
