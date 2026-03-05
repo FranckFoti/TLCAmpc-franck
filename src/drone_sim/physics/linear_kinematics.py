@@ -35,9 +35,7 @@ class LinearKinematicsPhysics(PhysicsModel):
          x = np.asarray(x, dtype=float).reshape(6)
       if not isinstance(u, np.ndarray) or u.shape != (3,):
          u = np.asarray(u, dtype=float).reshape(3)
-      new_state = self.A @ x + self.B @ u
-      new_state[3:6] = self.clip_velocity(new_state[3:6])
-      return new_state
+      return self.A @ x + self.B @ u
 
    def clip_velocity(self, vel: np.ndarray) -> np.ndarray:
       vel_mag = np.linalg.norm(vel)
@@ -46,7 +44,7 @@ class LinearKinematicsPhysics(PhysicsModel):
       return vel
 
    def predict_trajectory(self, x0: np.ndarray, u_seq: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-      """Vectorized trajectory prediction avoiding per-step overhead.
+      """Fully vectorized trajectory prediction without Python loop.
 
       :param x0: Initial state (6,).
       :param u_seq: Control sequence (H, 3).
@@ -56,20 +54,19 @@ class LinearKinematicsPhysics(PhysicsModel):
       u_seq = np.asarray(u_seq, dtype=float)
       if u_seq.ndim == 1:
          u_seq = u_seq.reshape((-1, 3))
-      H = u_seq.shape[0]
-      A = self.A
-      B = self.B
-      v_max = self._v_max
-      positions = np.empty((H, 3), dtype=float)
-      velocities = np.empty((H, 3), dtype=float)
-      x = x0
-      for k in range(H):
-         x = A @ x + B @ u_seq[k]
-         vel = x[3:6]
-         vel_mag = np.linalg.norm(vel)
-         if vel_mag > v_max:
-            vel = vel * (v_max / vel_mag)
-            x[3:6] = vel
-         positions[k] = x[:3]
-         velocities[k] = vel
+
+      dt = self.dt
+      pos_0 = x0[:3]
+      vel_0 = x0[3:6]
+
+      # vel[k] = vel_0 + dt * cumsum(u[0:k])
+      velocities = vel_0 + dt * np.cumsum(u_seq, axis=0)
+
+      # pos[k] = pos[k-1] + dt * vel[k-1] + 0.5 * dt^2 * u[k-1]
+      vel_before = np.empty_like(u_seq)
+      vel_before[0] = vel_0
+      vel_before[1:] = velocities[:-1]
+      delta_pos = dt * vel_before + 0.5 * dt ** 2 * u_seq
+      positions = pos_0 + np.cumsum(delta_pos, axis=0)
+
       return positions, velocities

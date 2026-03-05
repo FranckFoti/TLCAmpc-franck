@@ -93,7 +93,6 @@ class TestLinearKinematicsPhysicsStep:
       expected = sample_physics.A @ x0 + sample_physics.B @ u
       assert_array_almost_equal(x1, expected)
 
-   @pytest.mark.skip(reason="v_max is clipped, so the test is invalid, maybe change or remove it")
    def test_step_large_control_values(self, sample_physics: LinearKinematicsPhysics):
       """Test step with large control values."""
       x0 = np.zeros(6)
@@ -167,7 +166,4 @@ class TestLinearKinematicsPhysicsEdgeCases:
 
 
       expected = physics.A @ x0 + physics.B @ u
-      assert_array_almost_equal(x1[:3], expected[:3]) # position should be equal
-      # remind the clipping
-      clipped_vel = [3.53516583, -3.53516583, -0.07214624]
-      assert_array_almost_equal(x1[3:], clipped_vel) # velocity is clipped to v_max
+      assert_array_almost_equal(x1, expected) # no velocity clipping in step()

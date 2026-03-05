@@ -214,10 +214,12 @@ class MovingObstacleAvoidanceConstraints(MPCConstraints):
       """
       parts = []
       ego_radii = _safety_radii(drone, pred_vel, self._horizon)
+      # For non-adaptive drones, all radii are identical — compute once
+      fixed_radii = None if drone.is_adaptive else ego_radii
       for neighbor_traj, neighbor_vel in neighbor_trajectories.values():
          neighbor_traj = np.asarray(neighbor_traj, dtype=float).reshape((self._horizon, 3))
          dists = np.linalg.norm(pred_pos - neighbor_traj, axis=1)
-         neighbor_radii = _safety_radii(drone, neighbor_vel, self._horizon)
+         neighbor_radii = fixed_radii if fixed_radii is not None else _safety_radii(drone, neighbor_vel, self._horizon)
          result = dists - (ego_radii + neighbor_radii)
          parts.append(result)
       if not parts:

@@ -230,12 +230,12 @@ class TestGlobalMPCSolverConstraints:
       # All constraints should be satisfied (>= 0)
       assert np.all(g >= 0)
 
-   def test_constraints_velocity_clipped_by_physics(self, solver: GlobalMPCSolver):
-      """Test velocity constraints are satisfied even with high initial velocity (physics clips it)."""
+   def test_constraints_velocity_violated_when_exceeding_vmax(self, solver: GlobalMPCSolver):
+      """Test velocity constraints report violations when velocity exceeds v_max (no physics clipping)."""
       num_drones = 1
       horizon = solver.horizon
       # Drone with velocity (3, 3, 3) has magnitude sqrt(27) ~ 5.2 m/s
-      # With v_max=2.0, physics.step() clips velocity to 2.0, so constraint stays satisfied.
+      # With v_max=2.0 and no physics clipping, velocity constraints should be violated.
       d1 = _make_drone("d1", np.array([0.0, 0.0, 0.0, 3.0, 3.0, 3.0]), np.zeros(3),
                         CentralMPCAgent(dt=solver.dt), v_max=2.0)
       u_flat = np.zeros(num_drones * horizon * 3)
@@ -248,8 +248,8 @@ class TestGlobalMPCSolverConstraints:
          room_max=None,
       )
 
-      # All constraints should be satisfied because physics.step() clips velocity
-      assert np.all(g >= -1e-9)
+      # Velocity constraints should be violated since speed > v_max and step() no longer clips
+      assert np.any(g < 0)
 
 
 class TestGlobalMPCSolverConstraintIntegration:

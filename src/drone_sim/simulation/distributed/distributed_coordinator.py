@@ -98,8 +98,9 @@ class DistributedMPCCoordinator:
       converged = False
       stagnated = False
 
-      # Track controls across iterations for final output
+      # Track controls and velocities across iterations
       controls: dict[str, np.ndarray] = {}
+      velocities: dict[str, np.ndarray | None] = {did: None for did in trajectories}
 
       # Track trajectory changes for stagnation detection
       prev_trajectories: dict[str, np.ndarray] = {did: traj.copy() for did, traj in trajectories.items()}
@@ -115,7 +116,7 @@ class DistributedMPCCoordinator:
                random.shuffle(drone_order)
             else:
                # Later iterations: priority-based ordering (most constrained first)
-               drone_order.sort(key=lambda d: self._compute_priority(d, trajectories, all_drones_by_id))
+               drone_order.sort(key=lambda d: self._compute_priority(d, trajectories, velocities, all_drones_by_id))
 
          # 3a. Broadcast current trajectories via mailbox (initial state)
          self._mailbox.clear()
@@ -149,6 +150,7 @@ class DistributedMPCCoordinator:
                # Immediate update (Gauss-Seidel style)
                trajectories[drone_id] = traj_opt
                controls[drone_id] = u_opt
+               velocities[drone_id] = vel_opt
 
                # Broadcast immediately so next drone sees updated trajectory
                self._mailbox.broadcast(sender_id=drone_id, trajectory=traj_opt,
@@ -156,7 +158,7 @@ class DistributedMPCCoordinator:
                                        neighbor_graph=self._neighbor_graph)
          else:
             # Jacobi: all drones use stale data, update all at once
-            trajectories, controls = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max, prev_controls=controls)
+            trajectories, controls, velocities = self._jacobi(drone_order, drone_by_id, local_solvers, iteration, obstacles, room_min, room_max, prev_controls=controls)
 
          # 3c. Stagnation detection — break early if no drone made progress
          stagnated, prev_trajectories = self.is_stagneted(trajectories, prev_trajectories, opt_ids, stagnation_count, iteration)
@@ -164,7 +166,7 @@ class DistributedMPCCoordinator:
             break
 
          # 3d. Update z and lambda for all neighbor pairs
-         self.update_z(trajectories, all_drones_by_id, neighbor_pairs)
+         self.update_z(trajectories, velocities, all_drones_by_id, neighbor_pairs)
 
          # 3e. Check convergence
          if self._admm_state.is_converged(trajectories):
@@ -200,7 +202,7 @@ class DistributedMPCCoordinator:
    def _jacobi(self, drone_order: list[str], drone_by_id: dict[str, Drone], local_solvers: dict[str, LocalMPCSolver], iteration: int,
                obstacles: list[tuple[np.ndarray, np.ndarray]] | None = None, room_min: np.ndarray | None = None,
                room_max: np.ndarray | None = None,
-               prev_controls: dict[str, np.ndarray] | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+               prev_controls: dict[str, np.ndarray] | None = None) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, np.ndarray]]:
       """Jacobi update: all drones solve using stale neighbor data, then update all at once."""
       new_trajectories: dict[str, np.ndarray] = {}
       new_controls: dict[str, np.ndarray] = {}
@@ -236,20 +238,17 @@ class DistributedMPCCoordinator:
                                  predicted_velocities=new_velocities[drone_id], timestamp=0,
                                  neighbor_graph=self._neighbor_graph)
 
-      return new_trajectories, new_controls
+      return new_trajectories, new_controls, new_velocities
 
-   def update_z(self, trajectories: dict[str, np.ndarray], all_drones_by_id: dict[str, Drone], neighbor_pairs: list[tuple[str, str]]) -> None:
+   def update_z(self, trajectories: dict[str, np.ndarray], vel_dict: dict[str, np.ndarray | None],
+                all_drones_by_id: dict[str, Drone], neighbor_pairs: list[tuple[str, str]]) -> None:
       for pair in neighbor_pairs:
          id_i, id_j = pair
          traj_i = trajectories[id_i]
          traj_j = trajectories[id_j]
 
-         # Get velocities from broadcast messages
-         vel_i = self._get_velocity_from_messages(id_i, id_j)
-         vel_j = self._get_velocity_from_messages(id_j, id_i)
-
-         radii_i = self._compute_safety_radii(all_drones_by_id[id_i], vel_i)
-         radii_j = self._compute_safety_radii(all_drones_by_id[id_j], vel_j)
+         radii_i = self._compute_safety_radii(all_drones_by_id[id_i], vel_dict.get(id_i))
+         radii_j = self._compute_safety_radii(all_drones_by_id[id_j], vel_dict.get(id_j))
          min_dist = radii_i + radii_j
 
          self._admm_state.update_z(pair, traj_i, traj_j, min_dist)
@@ -314,43 +313,39 @@ class DistributedMPCCoordinator:
       """Get current neighbor pairs for visualization."""
       return self._neighbor_graph.get_neighbor_pairs()
 
-   def _compute_priority(self, drone_id: str, trajectories: dict[str, np.ndarray], all_drones_by_id: dict[str, Drone]) -> float:
+   def _compute_priority(self, drone_id: str, trajectories: dict[str, np.ndarray],
+                         vel_dict: dict[str, np.ndarray | None], all_drones_by_id: dict[str, Drone]) -> float:
       """Compute priority score - lower = higher priority (solve first).
 
       Drones with smaller safety margins to neighbors get higher priority.
-      This ensures drones in conflict zones solve first and commit to a
-      direction, forcing others to adapt.
 
       :param drone_id: ID of the drone
       :param trajectories: Current trajectories for all drones
+      :param vel_dict: Current velocities for all drones (or None per drone)
       :param all_drones_by_id: All drones by ID for safety radius computation
       :return: Priority score (lower = higher priority = solve first)
       """
       neighbors = self._neighbor_graph.get_neighbors(drone_id)
       if not neighbors:
-         return float("inf")  # No neighbors = lowest priority
+         return float("inf")
 
       min_margin = float("inf")
       traj_i = trajectories.get(drone_id)
       if traj_i is None:
          return float("inf")
 
-      # Get drone_id's velocity from any neighbor's inbox
-      any_neighbor = next(iter(neighbors))
-      vel_i = self._get_velocity_from_messages(drone_id, any_neighbor)
-      radii_i = self._compute_safety_radii(all_drones_by_id[drone_id], vel_i)
+      radii_i = self._compute_safety_radii(all_drones_by_id[drone_id], vel_dict.get(drone_id))
 
       for neighbor_id in neighbors:
          traj_j = trajectories.get(neighbor_id)
          if traj_j is None:
             continue
-         vel_j = self._get_velocity_from_messages(neighbor_id, drone_id)
-         radii_j = self._compute_safety_radii(all_drones_by_id[neighbor_id], vel_j)
+         radii_j = self._compute_safety_radii(all_drones_by_id[neighbor_id], vel_dict.get(neighbor_id))
          min_dist = float(np.mean(radii_i) + np.mean(radii_j))
          dists = np.linalg.norm(traj_i - traj_j, axis=1)
          min_margin = min(min_margin, float(np.min(dists)) - min_dist)
 
-      return min_margin  # Smaller margin = higher priority
+      return min_margin
 
    def _compute_safety_radii(self, drone: Drone, velocities: np.ndarray | None) -> np.ndarray:
       """Compute per-step safety radii for a drone.

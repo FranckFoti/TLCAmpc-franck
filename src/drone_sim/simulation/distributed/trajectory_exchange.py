@@ -66,7 +66,7 @@ class TrajectoryMailbox:
         :param receiver_id: ID of the receiving drone
         :return: Dict mapping sender_id to TrajectoryMessage. Returns empty dict if no messages.
         """
-        return self._inbox.get(receiver_id, {}).copy()
+        return self._inbox.get(receiver_id, {})
 
     def clear(self) -> None:
         """Clear all messages from all inboxes.

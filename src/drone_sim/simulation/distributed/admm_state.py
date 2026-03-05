@@ -64,8 +64,10 @@ class ADMMState:
         if canonical not in self._lambdas:
             return
 
-        traj_i = np.asarray(traj_i, dtype=float).reshape((self.horizon, 3))
-        traj_j = np.asarray(traj_j, dtype=float).reshape((self.horizon, 3))
+        if not isinstance(traj_i, np.ndarray) or traj_i.shape != (self.horizon, 3):
+            traj_i = np.asarray(traj_i, dtype=float).reshape((self.horizon, 3))
+        if not isinstance(traj_j, np.ndarray) or traj_j.shape != (self.horizon, 3):
+            traj_j = np.asarray(traj_j, dtype=float).reshape((self.horizon, 3))
 
         # Support both scalar and per-step min_dist
         min_dists = (
@@ -112,8 +114,10 @@ class ADMMState:
         if canonical not in self._lambdas:
             return
 
-        traj_i = np.asarray(traj_i, dtype=float).reshape((self.horizon, 3))
-        traj_j = np.asarray(traj_j, dtype=float).reshape((self.horizon, 3))
+        if not isinstance(traj_i, np.ndarray) or traj_i.shape != (self.horizon, 3):
+            traj_i = np.asarray(traj_i, dtype=float).reshape((self.horizon, 3))
+        if not isinstance(traj_j, np.ndarray) or traj_j.shape != (self.horizon, 3):
+            traj_j = np.asarray(traj_j, dtype=float).reshape((self.horizon, 3))
 
         diff = traj_i - traj_j
         z = self._z[canonical]
@@ -141,10 +145,12 @@ class ADMMState:
             if id_i not in trajectories or id_j not in trajectories:
                 continue
 
-            traj_i = np.asarray(trajectories[id_i],
-                               dtype=float).reshape((self.horizon, 3))
-            traj_j = np.asarray(trajectories[id_j],
-                               dtype=float).reshape((self.horizon, 3))
+            traj_i = trajectories[id_i]
+            if not isinstance(traj_i, np.ndarray) or traj_i.shape != (self.horizon, 3):
+                traj_i = np.asarray(traj_i, dtype=float).reshape((self.horizon, 3))
+            traj_j = trajectories[id_j]
+            if not isinstance(traj_j, np.ndarray) or traj_j.shape != (self.horizon, 3):
+                traj_j = np.asarray(traj_j, dtype=float).reshape((self.horizon, 3))
 
             # Primal residual: ||p_i - p_j - z||
             diff = traj_i - traj_j

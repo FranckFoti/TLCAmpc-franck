@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy.optimize import minimize, OptimizeResult
 
-from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints)
+from drone_sim.domain.constraints import (MovingObstacleAvoidanceConstraints, ObstacleAvoidanceConstraints, RoomConstraints, VelocityConstraints)
 
 _log = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ class LocalMPCSolver:
       collision_c = MovingObstacleAvoidanceConstraints(horizon=horizon)
       obstacle_c = ObstacleAvoidanceConstraints(horizon=horizon)
       room_c = RoomConstraints(horizon=horizon) if room_min is not None and room_max is not None else None
+      velocity_c = VelocityConstraints(horizon=horizon)
 
       # Extract cost weights for inline computation (avoids redundant predict_trajectory in central_cost)
       qp = np.diag(controller._Qp)  # (3,)
@@ -98,11 +99,13 @@ class LocalMPCSolver:
       # by SLSQP on each iteration, so we cache to avoid duplicate predict_trajectory calls.
       _cache_u = [None]
       _cache_result = [None]
+      _cache_g = [None]
 
       def _predict_cached(u_flat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
          if _cache_u[0] is None or not np.array_equal(u_flat, _cache_u[0]):
             _cache_u[0] = u_flat.copy()
             _cache_result[0] = self._predict_states(drone, u_flat.reshape((horizon, 3)))
+            _cache_g[0] = None  # invalidate constraint cache
          return _cache_result[0]
 
       def cost(u_flat: np.ndarray) -> float:
@@ -118,20 +121,27 @@ class LocalMPCSolver:
 
       def constraints(u_flat: np.ndarray) -> np.ndarray:
          positions, velocities = _predict_cached(u_flat)
+         if _cache_g[0] is not None:
+            return _cache_g[0]
 
          parts = []
-         c = collision_c.evaluate_single(drone, positions, neighbor_trajectories, np.empty(0), pred_vel=velocities)
+         c = collision_c._evaluate(drone, positions, neighbor_trajectories, pred_vel=velocities)
          if len(c) > 0:
             parts.append(c)
-         c = obstacle_c.evaluate_single(drone, positions, obstacles, np.empty(0), pred_vel=velocities)
+         c = obstacle_c._evaluate(drone, positions, obstacles, pred_vel=velocities)
          if len(c) > 0:
             parts.append(c)
          if room_c is not None:
-            c = room_c.evaluate_single(drone, positions, room_max, room_min, np.empty(0), pred_vel=velocities)
+            c = room_c._evaluate(drone, positions, room_max, room_min, pred_vel=velocities)
             if len(c) > 0:
                parts.append(c)
+         # Velocity constraints to enforce v_max via SLSQP
+         speed_sq = np.sum(velocities[:horizon] ** 2, axis=1)
+         parts.append(drone.v_max ** 2 - speed_sq)
 
-         return np.concatenate(parts) if parts else np.array([], dtype=float)
+         g = np.concatenate(parts) if parts else np.array([], dtype=float)
+         _cache_g[0] = g
+         return g
 
       # Build bounds
       axis_bounds = [(float(u_min[a]), float(u_max[a])) for a in range(3)]
@@ -142,10 +152,15 @@ class LocalMPCSolver:
                         options={"maxiter": self.max_iter, "ftol": self.f_tol, "disp": False})
 
       u_opt = np.clip(result.x.reshape((horizon, 3)), u_min, u_max)
-      traj_opt, vel_opt = self._predict_states(drone, u_opt)
 
-      # Check constraint satisfaction
-      g = constraints(u_opt.flatten())
+      # Reuse cached prediction/constraints if u_opt matches last evaluation
+      u_opt_flat = u_opt.flatten()
+      if _cache_u[0] is not None and np.array_equal(u_opt_flat, _cache_u[0]):
+         traj_opt, vel_opt = _cache_result[0]
+         g = _cache_g[0] if _cache_g[0] is not None else constraints(u_opt_flat)
+      else:
+         traj_opt, vel_opt = self._predict_states(drone, u_opt)
+         g = constraints(u_opt_flat)
       feasible = result.success and (len(g) == 0 or g.min() >= -self.f_tol)
 
       # Infeasible fallback: decelerate, then hold position

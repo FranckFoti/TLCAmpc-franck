@@ -237,10 +237,10 @@ class TestTrajectoryMailbox:
                 assert msg.drone_id == sender_id
                 assert msg.trajectory.shape == (5, 3)
 
-    def test_receive_returns_copy(
+    def test_receive_returns_same_reference(
         self, mailbox: TrajectoryMailbox, neighbor_graph: NeighborGraph
     ):
-        """Test receive returns a copy, not the internal dict."""
+        """Test receive returns the internal dict directly (no copy for performance)."""
         trajectory = np.zeros((5, 3))
 
         mailbox.broadcast(
@@ -254,14 +254,8 @@ class TestTrajectoryMailbox:
         msgs1 = mailbox.receive("drone-2")
         msgs2 = mailbox.receive("drone-2")
 
-        # Should be equal but not the same object
         assert msgs1 == msgs2
-        assert msgs1 is not msgs2
-
-        # Modifying returned dict should not affect mailbox
-        msgs1.clear()
-        msgs3 = mailbox.receive("drone-2")
-        assert "drone-1" in msgs3
+        assert msgs1 is msgs2
 
     def test_broadcast_with_all_neighbors_radius(self):
         """Test broadcast when comm_radius=None (all drones are neighbors)."""
