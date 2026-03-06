@@ -1,6 +1,6 @@
 {
   "dt": 0.1,
-  "room": {"min": [-20, -5, -5], "max": [18, 5, 5]},
+  "room": {"min": [-12, -5, -5], "max": [18, 5, 5]},
 
   "physics": [
     {
@@ -28,16 +28,15 @@
   "coordinator": {
     "type": "mpc_central",
     "params": {
-      "horizon": 8,
-      "max_iter": 100
+      "horizon": 8
     }
   },
 
   "obstacles": [
-    {"center": [0.0,  3.275, 0.0],  "half_extents": [1.0, 1.725, 5.0]},
-    {"center": [0.0, -3.275, 0.0],  "half_extents": [1.0, 1.725, 5.0]},
-    {"center": [0.0,  0.0,  3.275], "half_extents": [1.0, 1.55, 1.725]},
-    {"center": [0.0,  0.0, -3.275], "half_extents": [1.0, 1.55, 1.725]}
+    {"center": [0.0,  3.4125, 0.0],  "half_extents": [1.0, 1.5875, 5.0]},
+    {"center": [0.0, -3.4125, 0.0],  "half_extents": [1.0, 1.5875, 5.0]},
+    {"center": [0.0,  0.0,  3.4125], "half_extents": [1.0, 1.825, 1.5875]},
+    {"center": [0.0,  0.0, -3.4125], "half_extents": [1.0, 1.825, 1.5875]}
   ],
 
   "drones": [
@@ -55,7 +54,7 @@
     {
       "drone_id": "drone-2",
       "physics": "standard",
-      "start":  [-8.0, -2.2, -2.2],
+      "start":  [-6.0, -2.2, -2.2],
       "target": [12.3, 0.0, 0.0],
       "radius": 0.4,
       "safety_zone": 1.0,
@@ -66,7 +65,7 @@
     {
       "drone_id": "drone-3",
       "physics": "standard",
-      "start":  [-11.0, 2.2, -2.2],
+      "start":  [-7.0, 2.2, -2.2],
       "target": [9.2, 0.0, 0.0],
       "radius": 0.4,
       "safety_zone": 1.0,
@@ -77,7 +76,7 @@
     {
       "drone_id": "drone-4",
       "physics": "standard",
-      "start":  [-14.0, -2.2, 2.2],
+      "start":  [-8.0, -2.2, 2.2],
       "target": [6.1, 0.0, 0.0],
       "radius": 0.4,
       "safety_zone": 1.0,
@@ -88,7 +87,7 @@
     {
       "drone_id": "drone-5",
       "physics": "standard",
-      "start":  [-18.0, 2.2, 2.2],
+      "start":  [-9.0, 2.2, 2.2],
       "target": [3.0, 0.0, 0.0],
       "radius": 0.4,
       "safety_zone": 1.0,

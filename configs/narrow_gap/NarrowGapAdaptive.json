@@ -17,7 +17,7 @@
   "controller": {
     "type": "mpc_agent_adaptive",
     "params": {
-      "horizon": 4,
+      "horizon": 8,
       "lambda_vel": 1.0,
       "q_pos": [2.0, 2.0, 2.0],
       "q_vel": [1.0, 1.0, 1.0],
@@ -26,9 +26,9 @@
   },
 
   "coordinator": {
-    "type": "mpc_central",
+    "type": "dmpc_admm",
     "params": {
-      "horizon": 4
+      "horizon": 8
     }
   },
 
@@ -44,7 +44,7 @@
       "drone_id": "drone-1",
       "physics": "standard",
       "start":  [-3.4, -3.4, -3.4],
-      "target": [3.4, 1.5, 0.0],
+      "target": [3.8, 1.5, 0.0],
       "radius": 0.4,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
@@ -54,7 +54,7 @@
       "drone_id": "drone-2",
       "physics": "standard",
       "start":  [-3.4, 3.4, -3.4],
-      "target": [3.4, -1.5, 0.0],
+      "target": [3.8, -1.5, 0.0],
       "radius": 0.4,
       "safety_zone": 1.0,
       "cons_stop": 0.0,
