@@ -70,7 +70,8 @@ def _create_scenario(config_path: str | Path | None, params: dict[str, str] | No
    return scenario
 
 def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | None, steps: int, step_n: int, sleep_s: float, trace_len: int,
-                  width: int, height: int, dpi: int, elev: float, azim: float, record_dir: str | Path | None, gif_path: str | Path | None, gif_fps: float) -> None:
+                  width: int, height: int, dpi: int, elev: float, azim: float, record_dir: str | Path | None, gif_path: str | Path | None, gif_fps: float,
+                  obj_name: str | None=None) -> None:
    scenario = _create_scenario(config_path=config_path, params=params)
 
    sim = Simulator.from_config(scenario)
@@ -121,14 +122,14 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
       admm_iteration_count = sim.coordinator.get_last_iteration_count() if is_distributed else None
       admm_converged = sim.coordinator.get_last_converged() if is_distributed else None
 
-      # obj_path = Path(__file__).resolve().parent.parent / "src" / "drone_sim" / "resources" / "assets" / "drone_costum_0_0_5.obj"
+      obj_path = str(Path(__file__).resolve().parent.parent / "src" / "drone_sim" / "resources" / "assets" / obj_name) if obj_name else None
       png_bytes = render_png(room_min=sim.room_min, room_max=sim.room_max, drones=sim.drones,
                              drone_traces=traces, obstacles=sim.obstacles,
                              step_count=sim.step_count, compute_time_s=sim.compute_time_s,
                              neighbor_links=neighbor_links, admm_iteration_count=admm_iteration_count, admm_converged=admm_converged,
                              safety_alphas=safety_alphas,
-                             width=width, height=height, dpi=dpi, elev=elev, azim=azim
-                             # ,obj_path=str(obj_path), obj_scale=0.5, draw_sphere_if_obj=True
+                             width=width, height=height, dpi=dpi, elev=elev, azim=azim,
+                             obj_path=obj_path, obj_scale=0.5, draw_sphere_if_obj=False
                              )
 
       # For display
@@ -200,6 +201,8 @@ def main(argv: list[str] | None = None) -> None:
    p.add_argument("--elev", type=float, default=20.0)
    p.add_argument("--azim", type=float, default=-60.0)
 
+   p.add_argument("--obj-name", type=str)
+
    args = p.parse_args(argv)
    logging.basicConfig(level=getattr(logging, args.log_level), format="%(name)s %(levelname)s %(message)s")
 
@@ -207,7 +210,8 @@ def main(argv: list[str] | None = None) -> None:
    config_str = args.config
 
    run_live_view(config_path=config_str, params=params, steps=args.steps, step_n=args.step_n, sleep_s=args.sleep, trace_len=args.trace_len,
-                 width=args.width, height=args.height, dpi=args.dpi, elev=args.elev, azim=args.azim, record_dir=args.record_dir, gif_path=args.gif_path, gif_fps=args.gif_fps)
+                 width=args.width, height=args.height, dpi=args.dpi, elev=args.elev, azim=args.azim, record_dir=args.record_dir, gif_path=args.gif_path,
+                 gif_fps=args.gif_fps, obj_name=args.obj_name)
 
 
 def _die(msg: str, code: int = 1) -> "NoReturn":

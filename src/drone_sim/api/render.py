@@ -4,7 +4,7 @@ import io
 
 import numpy as np
 from drone_sim.domain.drone import Drone
-from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_obstacles, draw_neighbor_links, draw_sphere_wireframe, draw_trace, draw_ghost_max_sphere, has_drones_safety_zones, draw_obj_mesh
+from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_obstacles, draw_neighbor_links, draw_sphere_wireframe, draw_trace, draw_ghost_max_sphere, draw_obj_mesh
 
 def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drones: list[Drone], drone_traces: dict[str, list[np.ndarray]],
                obstacles: list[tuple[np.ndarray, np.ndarray]], step_count: int, compute_time_s: float, neighbor_links: list[tuple[int, int]] | None = None,
@@ -32,26 +32,22 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drones: list[Drone
    # Draw neighbor communication links
    draw_neighbor_links(ax, neighbor_links, [d.x for d in drones])
 
-   if has_drones_safety_zones(drones):
-      for drone in drones:
-         if drone.safety_zone is not None:
-            r = drone.radius
-            safety_zone = drone.compute_adaptive_radius(drone.velocity())
+   for drone in drones:
+      pos = np.asarray(drone.position(), dtype=float).reshape(3)
 
-            pos = np.asarray(drone.position(), dtype=float).reshape(3)
-            if obj_path is not None:
-               draw_obj_mesh(ax, pos, obj_path, scale=drone.radius*obj_scale*10, color=drone.color, alpha=0.8)
-            else:
-               ax.scatter([pos[0]], [pos[1]], [pos[2]], s=max(20.0, float(r) * 250.0), c=[drone.color], depthshade=True, label=drone.drone_id)
+      if obj_path is not None:
+         draw_obj_mesh(ax, pos, obj_path, scale=drone.radius * obj_scale * 10, color=drone.color, alpha=0.8)
+      else:
+         r = drone.radius
+         ax.scatter([pos[0]], [pos[1]], [pos[2]], s=max(20.0, float(r) * 250.0), c=[drone.color], depthshade=True, label=drone.drone_id)
 
-            if obj_path is None or draw_sphere_if_obj:
-               # Safety zones as wireframe spheres.
-               alpha_val = drone.alpha if safety_alphas else 0.8
-               draw_sphere_wireframe(ax, pos, radius=safety_zone, color=drone.safety_color, alpha=alpha_val, lw=0.6)
-               # Ghost sphere: maximum adaptive radius (only when larger than current zone)
-               draw_ghost_max_sphere(ax, drone, print_always=False)
+      if drone.safety_zone is not None and (obj_path is None or draw_sphere_if_obj):
+         safety_zone = drone.compute_adaptive_radius(drone.velocity())
+         alpha_val = drone.alpha if safety_alphas else 0.8
+         draw_sphere_wireframe(ax, pos, radius=safety_zone, color=drone.safety_color, alpha=alpha_val, lw=0.6)
+         draw_ghost_max_sphere(ax, drone, print_always=False)
 
-            draw_trace(ax, drone_traces.get(drone.drone_id, []), drone.trace_color)
+      draw_trace(ax, drone_traces.get(drone.drone_id, []), drone.trace_color)
 
    ax.set_xlabel("x")
    ax.set_ylabel("y")
@@ -73,7 +69,7 @@ def render_png(*, room_min: np.ndarray, room_max: np.ndarray, drones: list[Drone
       title += f" | ADMM: {admm_iteration_count} iter {status}"
    ax.set_title(title)
 
-   if has_drones_safety_zones(drones) or obstacles:
+   if drones or obstacles:
       ax.legend(loc="upper right")
 
    buf = io.BytesIO()
