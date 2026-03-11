@@ -222,6 +222,75 @@ def plot_all_four_comparison(df: pd.DataFrame, output_dir: Path, column: str, yl
             filename_base=f"{filename_base}_all4{('_log' if log_scale else '')}", figsize=figsize, log_scale=log_scale)
 
 
+def plot_scaling_curves(df: pd.DataFrame, output_dir: Path,
+                        coordinator: str, controller: str,
+                        n_drones_range: range | list[int] | None = None,
+                        figsize: tuple[float, float] = (12, 5),
+                        log_scale: bool = False) -> None:
+   """Line plot showing how mean_step_time and wall_time scale with N.
+
+   Shows mean ± std as shaded band for finished runs only.
+   Two subplots side by side: mean_step_time (left), wall_time (right).
+   """
+   finished = df[(df[STATUS_FIELD] == FINISHED_STATUS) &
+                 (df[COORDINATOR_TYPE_FIELD] == coordinator) &
+                 (df[SPHERE_TYPE_FIELD] == controller)].copy()
+   n_range = n_drones_range if n_drones_range is not None else sorted(df[N_DRONES_FIELD].unique())
+   drone_counts = sorted(n for n in finished[N_DRONES_FIELD].unique() if n in n_range)
+
+   if not drone_counts:
+      return
+
+   columns = [("mean_step_time_s", "Mean Step Time [s]"),
+              ("wall_time_s", "Wall Time [s]")]
+   color = COLOR_BY_DRONE_INDEX[COMBO_COLOR_INDEX.get(
+      (coordinator, controller), SINGLE_COLOR_INDEX.get(coordinator, 1))]
+
+   fig, axes = plt.subplots(1, 2, figsize=figsize)
+   for ax, (col, ylabel) in zip(axes, columns):
+      means, stds, counts = [], [], []
+      for n in drone_counts:
+         vals = finished[finished[N_DRONES_FIELD] == n][col]
+         means.append(vals.mean())
+         stds.append(vals.std())
+         counts.append(len(vals))
+
+      means_arr = np.array(means)
+      stds_arr = np.array(stds)
+
+      ax.plot(drone_counts, means_arr, "o-", color=color, linewidth=2, markersize=5)
+      lower = means_arr - stds_arr
+      if log_scale:
+         lower = np.maximum(lower, means_arr * 0.05)  # clamp to 5% of mean for log scale
+      else:
+         lower = np.maximum(lower, 0)
+      ax.fill_between(drone_counts, lower, means_arr + stds_arr,
+                       color=color, alpha=0.2)
+
+      # Annotate sample counts
+      for x, y, c in zip(drone_counts, means_arr, counts):
+         ax.annotate(f"n={c}", (x, y), textcoords="offset points",
+                     xytext=(0, 10), ha="center", fontsize=7, color="gray")
+
+      ax.set_xlabel("Number of Drones $N$", fontsize=12)
+      ax.set_ylabel(ylabel, fontsize=12)
+      if log_scale:
+         ax.set_yscale("log")
+      ax.grid(alpha=0.3)
+
+   coord_label = LABELS.get(coordinator, coordinator)
+   ctrl_label = LABELS.get(controller, controller)
+   fig.suptitle(f"Scaling: {coord_label} / {ctrl_label}", fontsize=13)
+   fig.tight_layout()
+
+   suffix = "_log" if log_scale else ""
+   base = f"scaling_{coordinator}_{controller}_{n_range}{suffix}"
+   for ext, kwargs in [("png", dict(dpi=300)), ("eps", dict(format="eps"))]:
+      fig.savefig(output_dir / f"{base}.{ext}", **kwargs)
+   print(f"Saved {output_dir / base}.png  (+eps)")
+   plt.close(fig)
+
+
 def plot_all_four_deadlock(df: pd.DataFrame, output_dir: Path, n_drones_range: range | list[int] | None = None, figsize: tuple[float, float] = (12, 5)) -> None:
    """Deadlock bar chart with all 4 combos (2 coordinators x 2 controllers) side by side."""
    n_range = n_drones_range if n_drones_range is not None else sorted(df[N_DRONES_FIELD].unique())
@@ -246,21 +315,29 @@ def main(metrics_csv: Path | None = None) -> None:
    print()
 
    n_range = range(2, 12)
+   n_range_all = range(2, 25)
 
    plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range, field="mean_step_time")
    plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range, field="arrival")
-   plot_coord_and_sphere_combination(df, OUTPUT_DIR, field="mean_step_time")
-   plot_coord_and_sphere_combination(df, OUTPUT_DIR, field="arrival")
+   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range_all, field="mean_step_time")
+   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range_all, field="arrival")
 
    # All 4 combos (2 coordinators x 2 controllers) direct comparison
    plot_all_four_comparison(df, OUTPUT_DIR, column="mean_step_time_s", ylabel="Mean Step Time [s]", title_prefix="Mean Step Time", filename_base=f"mean_step_time{n_range}", n_drones_range=n_range)
    plot_all_four_comparison(df, OUTPUT_DIR, column="wall_time_s", ylabel="Wall Time [s]", title_prefix="Wall Time", filename_base=f"wall_time{n_range}", n_drones_range=n_range)
    plot_all_four_comparison(df, OUTPUT_DIR, column="steps", ylabel="Arrival Time [steps]", title_prefix="Arrival Time", filename_base=f"arrival_time{n_range}", n_drones_range=n_range)
-   plot_all_four_comparison(df, OUTPUT_DIR, column="mean_step_time_s", ylabel="Mean Step Time [s]", title_prefix="Mean Step Time", filename_base=f"mean_step_time")
-   plot_all_four_comparison(df, OUTPUT_DIR, column="wall_time_s", ylabel="Wall Time [s]", title_prefix="Wall Time", filename_base=f"wall_time")
-   plot_all_four_comparison(df, OUTPUT_DIR, column="steps", ylabel="Arrival Time [steps]", title_prefix="Arrival Time", filename_base=f"arrival_time")
+   plot_all_four_comparison(df, OUTPUT_DIR, column="mean_step_time_s", ylabel="Mean Step Time [s]", title_prefix="Mean Step Time", filename_base=f"mean_step_time{n_range_all}", n_drones_range=n_range_all)
+   plot_all_four_comparison(df, OUTPUT_DIR, column="wall_time_s", ylabel="Wall Time [s]", title_prefix="Wall Time", filename_base=f"wall_time{n_range_all}", n_drones_range=n_range_all)
+   plot_all_four_comparison(df, OUTPUT_DIR, column="steps", ylabel="Arrival Time [steps]", title_prefix="Arrival Time", filename_base=f"arrival_time{n_range_all}", n_drones_range=n_range_all)
 
    plot_all_four_deadlock(df, OUTPUT_DIR, n_drones_range=n_range)
+   plot_all_four_deadlock(df, OUTPUT_DIR, n_drones_range=n_range_all)
+
+   # Scaling curves: mean_step_time & wall_time vs N
+   for coord, ctrl in [("mpc_central", "mpc_agent_adaptive"), ("dmpc_admm", "mpc_agent_adaptive")]:
+      for log in [False, True]:
+         plot_scaling_curves(df, OUTPUT_DIR, coordinator=coord, controller=ctrl, n_drones_range=n_range, log_scale=log)
+         plot_scaling_curves(df, OUTPUT_DIR, coordinator=coord, controller=ctrl, n_drones_range=n_range_all, log_scale=log)
 
    print("\nDone.")
 

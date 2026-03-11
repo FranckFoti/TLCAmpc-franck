@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,7 @@ class MainWindow(QMainWindow):
         self._run_to_completion: bool = False
         self._obj_path: Path | None = None  # path to .obj file for 3D drone model
         self._obj_scale: float = 0.3  # scale of the OBJ model in world units
+        self._last_result: StepResult | None = None
 
         # ---- Canvas ----
         fig = Figure()
@@ -54,6 +56,7 @@ class MainWindow(QMainWindow):
         self._btn_pause = QPushButton("Pause")
         self._btn_reset = QPushButton("Reset")
         self._btn_run_to_end = QPushButton("Run to Completion")
+        self._btn_screenshot = QPushButton("Screenshot")
         self._btn_obj_model = QPushButton("OBJ Model")
         self._obj_model_label = QLabel("Model: scatter")
 
@@ -106,6 +109,7 @@ class MainWindow(QMainWindow):
         self._btn_pause.clicked.connect(self._on_pause)
         self._btn_reset.clicked.connect(self._on_reset)
         self._btn_run_to_end.clicked.connect(self._on_run_to_completion)
+        self._btn_screenshot.clicked.connect(self._on_screenshot)
         self._btn_obj_model.clicked.connect(self._on_select_obj_model)
         self._speed_slider.valueChanged.connect(self._on_speed_changed)
 
@@ -233,6 +237,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(self._interval_ms, self._tick)
 
     def _redraw(self, result: StepResult) -> None:
+        self._last_result = result
         # Save orbit angle BEFORE cla() — ax.cla() resets elev/azim to defaults (pitfall 3)
         elev = self._ax.elev
         azim = self._ax.azim
@@ -317,6 +322,79 @@ class MainWindow(QMainWindow):
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------ #
+    # Screenshot                                                           #
+    # ------------------------------------------------------------------ #
+
+    def _on_screenshot(self) -> None:
+        result = self._last_result
+        if result is None:
+            QMessageBox.warning(self, "Screenshot", "No simulation loaded yet.")
+            return
+
+        sim_state = self._backend.get_state()
+
+        # Create a separate figure so the live canvas is not disturbed
+        fig = Figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
+        ax.view_init(elev=self._ax.elev, azim=self._ax.azim)
+
+        draw_room_wireframe(ax, sim_state.room_min, sim_state.room_max)
+        draw_obstacles(ax, sim_state.obstacles)
+
+        for drone in result.drones:
+            pos = drone.position
+            color = drone.color
+            safety_r = (drone.adaptive_safety_radius if drone.adaptive_safety_radius is not None else drone.safety_zone)
+            safety_color = drone.safety_color
+
+            if self._obj_path is not None:
+                draw_obj_mesh(ax, pos, self._obj_path, scale=drone.radius, color=color if isinstance(color, str) else "steelblue", alpha=0.8)
+                # Invisible scatter for legend entry with drone color
+                ax.scatter([pos[0]], [pos[1]], [pos[2]], s=40, c=[color] if isinstance(color, str) else [color], alpha=0.0, label=drone.drone_id)
+            else:
+                ax.scatter([pos[0]], [pos[1]], [pos[2]], s=80, c=[color] if isinstance(color, str) else [color], depthshade=True, label=drone.drone_id)
+                draw_sphere_wireframe(ax, pos, safety_r, color=safety_color, alpha=0.6, lw=0.6)
+                _draw_ghost_max_sphere(ax, drone.adaptive_safety_radius is not None, pos, drone.adaptive_safety_radius, drone.max_adaptive_safety_radius, safety_color)
+
+            trace = self._traces.get(drone.drone_id, [])
+            if trace:
+                draw_trace(ax, trace, drone.trace_color)
+
+        # Axis limits (match live view zoom)
+        room_min, room_max = sim_state.room_min, sim_state.room_max
+        cx = (room_min[0] + room_max[0]) / 2
+        cy = (room_min[1] + room_max[1]) / 2
+        cz = (room_min[2] + room_max[2]) / 2
+        hx = (room_max[0] - room_min[0]) / 2 * self._zoom
+        hy = (room_max[1] - room_min[1]) / 2 * self._zoom
+        hz = (room_max[2] - room_min[2]) / 2 * self._zoom
+        ax.set_xlim(cx - hx, cx + hx)
+        ax.set_ylim(cy - hy, cy + hy)
+        ax.set_zlim(cz - hz, cz + hz)
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
+
+        box = [room_max[i] - room_min[i] for i in range(3)]
+        if all(b > 0 for b in box):
+            ax.set_box_aspect(box)
+
+        # Scenario name (lower-left) and timestamp (lower-right)
+        scenario_name = Path(sim_state.config_path).stem if sim_state.config_path else "unknown"
+        fig.text(0.02, 0.02, scenario_name, fontsize=9, ha="left", va="bottom")
+        fig.text(0.98, 0.02, f"t = {result.t:.2f} s (step {result.step_count})", fontsize=9, ha="right", va="bottom")
+
+        # Save
+        out_dir = Path("screenshots")
+        out_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{scenario_name}_{result.step_count}_{timestamp}.png"
+        path = out_dir / filename
+        fig.savefig(str(path), dpi=150, bbox_inches="tight")
+
+        self._step_label.setText(f"Saved: {path.name}")
+
+    # ------------------------------------------------------------------ #
     # Speed slider                                                        #
     # ------------------------------------------------------------------ #
 
@@ -362,6 +440,7 @@ class MainWindow(QMainWindow):
             self._btn_pause.setParent(None)
             self._btn_reset.setParent(None)
             self._btn_run_to_end.setParent(None)
+            self._btn_screenshot.setParent(None)
             self._btn_obj_model.setParent(None)
             self._obj_model_label.setParent(None)
             self._speed_slider.setParent(None)
@@ -385,6 +464,7 @@ class MainWindow(QMainWindow):
             ctrl_layout.addWidget(self._btn_pause)
             ctrl_layout.addWidget(self._btn_reset)
             ctrl_layout.addWidget(self._btn_run_to_end)
+            ctrl_layout.addWidget(self._btn_screenshot)
             ctrl_layout.addSpacing(10)
             ctrl_layout.addWidget(self._btn_obj_model)
             ctrl_layout.addWidget(self._obj_model_label)
@@ -417,6 +497,7 @@ class MainWindow(QMainWindow):
             ctrl_layout.addWidget(self._btn_pause)
             ctrl_layout.addWidget(self._btn_reset)
             ctrl_layout.addWidget(self._btn_run_to_end)
+            ctrl_layout.addWidget(self._btn_screenshot)
             ctrl_layout.addWidget(self._btn_obj_model)
             ctrl_layout.addStretch()
             ctrl_layout.addWidget(QLabel("Speed:"))
