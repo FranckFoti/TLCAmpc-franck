@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -391,6 +392,37 @@ class MainWindow(QMainWindow):
         filename = f"{scenario_name}_{result.step_count}_{timestamp}.png"
         path = out_dir / filename
         fig.savefig(str(path), dpi=150, bbox_inches="tight")
+
+        # Save data snapshot for later re-rendering
+        snapshot = {
+            "scenario_name": scenario_name,
+            "config_path": sim_state.config_path,
+            "step_count": result.step_count,
+            "t": result.t,
+            "dt": sim_state.dt,
+            "room_min": sim_state.room_min.tolist(),
+            "room_max": sim_state.room_max.tolist(),
+            "obstacles": [(c.tolist(), e.tolist()) for c, e in sim_state.obstacles],
+            "view": {"elev": self._ax.elev, "azim": self._ax.azim, "zoom": self._zoom},
+            "drones": [
+                {
+                    "drone_id": d.drone_id,
+                    "position": d.position.tolist(),
+                    "velocity": d.velocity.tolist(),
+                    "radius": d.radius,
+                    "safety_zone": d.safety_zone,
+                    "adaptive_safety_radius": d.adaptive_safety_radius,
+                    "max_adaptive_safety_radius": d.max_adaptive_safety_radius,
+                    "color": d.color if isinstance(d.color, str) else list(d.color),
+                    "safety_color": d.safety_color if isinstance(d.safety_color, str) else list(d.safety_color),
+                    "trace_color": d.trace_color if isinstance(d.trace_color, str) else list(d.trace_color),
+                    "trace": [p.tolist() if hasattr(p, "tolist") else p for p in self._traces.get(d.drone_id, [])],
+                }
+                for d in result.drones
+            ],
+        }
+        snapshot_path = path.with_suffix(".json")
+        snapshot_path.write_text(json.dumps(snapshot, indent=2))
 
         self._step_label.setText(f"Saved: {path.name}")
 
