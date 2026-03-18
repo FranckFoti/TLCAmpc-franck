@@ -14,6 +14,8 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+from io import BytesIO
+from PIL import Image, ImageChops
 from matplotlib.figure import Figure
 
 matplotlib.rcParams.update({
@@ -156,8 +158,28 @@ def main() -> None:
                                ghost_sphere=args.ghost_sphere)
 
     out_path = args.out if args.out else args.json_path.with_name(args.json_path.stem + "_rerender.png")
-    fig.savefig(str(out_path), dpi=args.dpi, bbox_inches="tight")
+
+    eps_path = out_path.with_suffix(".eps")
+
+    if args.no_title:
+        # Render to buffer, then trim whitespace with PIL
+        buf = BytesIO()
+        fig.savefig(buf, dpi=args.dpi, bbox_inches="tight", format="png")
+        buf.seek(0)
+        img = Image.open(buf).convert("RGB")
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        diff = ImageChops.difference(img, bg)
+        bbox = diff.getbbox()
+        if bbox:
+            img = img.crop(bbox)
+        img.save(str(out_path), dpi=(args.dpi, args.dpi))
+        img.save(str(eps_path))
+    else:
+        fig.savefig(str(out_path), dpi=args.dpi, bbox_inches="tight")
+        fig.savefig(str(eps_path), dpi=args.dpi, bbox_inches="tight", format="eps")
+
     print(f"Saved {out_path}")
+    print(f"Saved {eps_path}")
 
 
 if __name__ == "__main__":
