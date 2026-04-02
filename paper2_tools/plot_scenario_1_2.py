@@ -10,10 +10,38 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
+
+# ── IEEE two-column paper style ──────────────────────────────────────
+IEEE_COL_WIDTH = 3.5        # single column width in inches
+IEEE_FULL_WIDTH = 7.16      # full text width in inches
+_BASE_FONT_SIZES = {
+    "font.size": 8,
+    "axes.titlesize": 9,
+    "axes.labelsize": 8,
+    "xtick.labelsize": 7,
+    "ytick.labelsize": 7,
+    "legend.fontsize": 7,
+}
+
+def set_font_scale(scale: float = 1.0) -> None:
+   """Apply font-size scaling factor on top of IEEE base sizes."""
+   matplotlib.rcParams.update({k: v * scale for k, v in _BASE_FONT_SIZES.items()})
+
+matplotlib.rcParams.update({
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+    "mathtext.fontset": "stix",        # Times-compatible math
+    "figure.dpi": 300,
+    "savefig.dpi": 300,
+    "savefig.bbox": "tight",
+    "savefig.pad_inches": 0.02,
+})
+set_font_scale(1.0)
 
 import sys
 
@@ -35,8 +63,8 @@ COORDINATOR_TYPES = ["mpc_central", "dmpc_admm"]
 SPHERE_TYPES = ["mpc_agent_adaptive", "mpc_agent"]
 
 LABELS = {
-      SPHERE_TYPES[0]: "Adaptive $r(v)$", SPHERE_TYPES[1]: "Static $r_{static}$",
-      COORDINATOR_TYPES[0]: "Central MPC", COORDINATOR_TYPES[1]: "DMPC-ADMM",
+      SPHERE_TYPES[0]: "$r_{a}(v)$", SPHERE_TYPES[1]: "$r_{s}$",
+      COORDINATOR_TYPES[0]: "MPC", COORDINATOR_TYPES[1]: "DMPC",
       CSV_FIELDS["mean_step_time"]: "Mean Step Time [s]", "mean_step_time_without": "Mean Step Time",
       CSV_FIELDS["arrival"]: "Mean Arrival Time [s]", "arrival_without": "Mean Arrival Time",
       CSV_FIELDS["steps"]: "Mean Steps"
@@ -87,8 +115,8 @@ def _build_combos(coordinator_list: list[str], controller_list: list[str]) -> tu
 
 
 def _boxplot_by_specific_coordinator_list_and_specific_controller_list_for_n_drones_range(df: pd.DataFrame, output_dir: Path, coordinator_list: list[str], controller_list: list[str],
-                                                                                          column: str, ylabel: str, title: str, filename_base: str, figsize: tuple[float, float] = (10, 5),
-                                                                                          n_drones_range: range | None = None, log_scale: bool = False) -> None:
+                                                                                          column: str, ylabel: str, title: str, filename_base: str, figsize: tuple[float, float] = (IEEE_COL_WIDTH, 2.4),
+                                                                                          n_drones_range: range | None = None, log_scale: bool = False, show_title: bool = True) -> None:
    """Box-whisker plot for every coordinator+controller combo, filtered by n_drones_range."""
    finished = df[df[STATUS_FIELD] == FINISHED_STATUS].copy()
    n_drones_range = n_drones_range if n_drones_range is not None else sorted(df[N_DRONES_FIELD].unique())
@@ -115,27 +143,28 @@ def _boxplot_by_specific_coordinator_list_and_specific_controller_list_for_n_dro
          pos = center + (j - (num_combos - 1) / 2) * width
          vals = data[combo][idx]
          if not vals:
-            ax.text(pos, 0.5, "\u2205", ha="center", va="center", fontsize=16, color=combo_colors[combo], alpha=0.8, transform=ax.get_xaxis_transform(),
+            ax.text(pos, 0.5, r"$\emptyset$", ha="center", va="center", fontsize=10, color=combo_colors[combo], alpha=0.8, transform=ax.get_xaxis_transform(),
                     clip_on=False)
             has_empty = True
             continue
          ax.boxplot(vals, positions=[pos], widths=width * 0.85, patch_artist=True, showmeans=True,
-                    meanprops=dict(marker="D", markerfacecolor="white", markeredgecolor="black", markersize=5), medianprops=dict(color="black", linewidth=1.5),
+                    meanprops=dict(marker="D", markerfacecolor="white", markeredgecolor="black", markersize=3), medianprops=dict(color="black", linewidth=1.2),
                     boxprops=dict(facecolor=combo_colors[combo], alpha=0.75), whiskerprops=dict(color="gray"), capprops=dict(color="gray"),
-                    flierprops=dict(marker="o", markersize=4, alpha=0.5))
+                    flierprops=dict(marker="o", markersize=2, alpha=0.5))
 
    centers = [idx * (1 + gap) for idx in range(len(drone_counts))]
    ax.set_xticks(centers)
    ax.set_xticklabels(drone_counts)
-   ax.set_xlabel("Number of Drones $N$", fontsize=12)
-   ax.set_ylabel(ylabel, fontsize=12)
-   ax.set_title(title, fontsize=13)
+   ax.set_xlabel("Number of Drones $N$")
+   ax.set_ylabel(ylabel)
+   if show_title:
+      ax.set_title(title)
 
    if log_scale:
       ax.set_yscale("log")
 
    legend_elements = [Patch(facecolor=combo_colors[c], alpha=0.75, label=combo_labels[c]) for c in combos]
-   ax.legend(handles=legend_elements, fontsize=11)
+   ax.legend(handles=legend_elements)
    ax.grid(axis="y", alpha=0.3)
 
    if has_empty:
@@ -152,7 +181,7 @@ def _boxplot_by_specific_coordinator_list_and_specific_controller_list_for_n_dro
 
 
 def _deadlock_by_specific_coordinator_list_and_specific_controller_list_for_n_drones_range(df: pd.DataFrame, output_dir: Path,  coordinator_list: list[str], controller_list: list[str],
-                                                                                           n_drones_range: list[int], title: str, filename_base: str, figsize: tuple[float, float] = (8, 5), ) -> None:
+                                                                                           n_drones_range: list[int], title: str, filename_base: str, figsize: tuple[float, float] = (IEEE_COL_WIDTH, 3.0), show_title: bool = True) -> None:
    """Bar chart: deadlock rate (%) for every coordinator+controller combo, filtered by n_drones_range."""
    drone_counts = sorted(n for n in df[N_DRONES_FIELD].unique() if n in n_drones_range)
 
@@ -175,18 +204,16 @@ def _deadlock_by_specific_coordinator_list_and_specific_controller_list_for_n_dr
    fig, ax = plt.subplots(figsize=figsize)
    for i, combo in enumerate(combos):
       offset = (i - (num_combos - 1) / 2) * width
-      bars = ax.bar(x + offset, rates[combo], width, label=combo_labels[combo], color=combo_colors[combo], edgecolor="white")
-      for bar, val in zip(bars, rates[combo]):
-         if val > 0:
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1.5, f"{val:.0f}%", ha="center", va="bottom", fontsize=9)
+      ax.bar(x + offset, rates[combo], width, label=combo_labels[combo], color=combo_colors[combo], edgecolor="white")
 
-   ax.set_xlabel("Number of Drones $N$", fontsize=12)
-   ax.set_ylabel("Deadlock Rate [%]", fontsize=12)
-   ax.set_title(title, fontsize=13)
+   ax.set_xlabel("Number of Drones $N$")
+   ax.set_ylabel("Deadlock Rate [\\%]")
+   if show_title:
+      ax.set_title(title)
    ax.set_xticks(x)
    ax.set_xticklabels(drone_counts)
    ax.set_ylim(0, 110)
-   ax.legend(fontsize=11)
+   ax.legend()
    ax.grid(axis="y", alpha=0.3)
 
    fig.tight_layout()
@@ -198,39 +225,45 @@ def _deadlock_by_specific_coordinator_list_and_specific_controller_list_for_n_dr
    plt.close(fig)
 
 
-def plot_coord_and_sphere_combination(df: pd.DataFrame, output_dir: Path, field: str, n_drones_range: range | list[int] | None = None):
+def plot_coord_and_sphere_combination(df: pd.DataFrame, output_dir: Path, field: str, n_drones_range: range | list[int] | None = None, show_title: bool = True):
    # Mean step time:
    for coordinator in COORDINATOR_TYPES:
       for log_scale in [True, False]:
          _boxplot_by_specific_coordinator_list_and_specific_controller_list_for_n_drones_range(df=df, output_dir=output_dir, filename_base=f"{CSV_FIELDS[field]}_{coordinator}_{('log' if log_scale else '')}_{n_drones_range}",
                                                                                                title=f"{LABELS[f"{field}_without"]}: {LABELS[SPHERE_TYPES[0]]} vs. {LABELS[SPHERE_TYPES[1]]} Spheres ({LABELS[coordinator]})",
                                                                                                ylabel=LABELS[CSV_FIELDS[field]], column=CSV_FIELDS[field], coordinator_list=[coordinator], controller_list=SPHERE_TYPES,
-                                                                                               n_drones_range=n_drones_range, figsize=(10, 5), log_scale=log_scale)
+                                                                                               n_drones_range=n_drones_range, figsize=(IEEE_COL_WIDTH, 2.4), log_scale=log_scale, show_title=show_title)
    for sphere in SPHERE_TYPES:
       for log_scale in [True, False]:
          _boxplot_by_specific_coordinator_list_and_specific_controller_list_for_n_drones_range(df=df, output_dir=output_dir, filename_base=f"{CSV_FIELDS[field]}_{sphere}_{('log' if log_scale else '')}_{n_drones_range}",
                                                                                                title=f"{LABELS[f"{field}_without"]}: {LABELS[COORDINATOR_TYPES[0]]} vs. {LABELS[COORDINATOR_TYPES[1]]} ({LABELS[sphere]})",
                                                                                                ylabel=LABELS[CSV_FIELDS[field]], column=CSV_FIELDS[field], coordinator_list=COORDINATOR_TYPES, controller_list=[sphere],
-                                                                                               n_drones_range=n_drones_range, figsize=(10, 5), log_scale=log_scale)
+                                                                                               n_drones_range=n_drones_range, figsize=(IEEE_COL_WIDTH, 2.4), log_scale=log_scale, show_title=show_title)
 
 
-def plot_all_four_comparison(df: pd.DataFrame, output_dir: Path, column: str, ylabel: str, title_prefix: str, filename_base: str, n_drones_range: range | list[int] | None = None, figsize: tuple[float, float] = (12, 5)) -> None:
+def plot_all_four_comparison(df: pd.DataFrame, output_dir: Path, column: str, ylabel: str, title_prefix: str, filename_base: str, n_drones_range: range | list[int] | None = None, figsize: tuple[float, float] = (IEEE_FULL_WIDTH, 2.8), show_title: bool = True) -> None:
    """Boxplot with all 4 combos (2 coordinators x 2 controllers) side by side, for a given column."""
    for log_scale in [False, True]:
       _boxplot_by_specific_coordinator_list_and_specific_controller_list_for_n_drones_range(df=df, output_dir=output_dir, coordinator_list=COORDINATOR_TYPES,
             controller_list=SPHERE_TYPES, n_drones_range=n_drones_range, column=column, ylabel=ylabel, title=f"{title_prefix}: All Coordinators & Controllers",
-            filename_base=f"{filename_base}_all4{('_log' if log_scale else '')}", figsize=figsize, log_scale=log_scale)
+            filename_base=f"{filename_base}_all4{('_log' if log_scale else '')}", figsize=figsize, log_scale=log_scale, show_title=show_title)
+
+
+SCALING_COLUMNS_ALL = [("mean_step_time_s", "Mean Step Time [s]"),
+                       ("wall_time_s", "Wall Time [s]")]
 
 
 def plot_scaling_curves(df: pd.DataFrame, output_dir: Path,
                         coordinator: str, controller: str,
                         n_drones_range: range | list[int] | None = None,
-                        figsize: tuple[float, float] = (12, 5),
-                        log_scale: bool = False) -> None:
-   """Line plot showing how mean_step_time and wall_time scale with N.
+                        figsize: tuple[float, float] | None = None,
+                        log_scale: bool = False, show_title: bool = True,
+                        columns: list[tuple[str, str]] | None = None) -> None:
+   """Line plot showing how mean_step_time and/or wall_time scale with N.
 
    Shows mean ± std as shaded band for finished runs only.
-   Two subplots side by side: mean_step_time (left), wall_time (right).
+   *columns* selects which metrics to plot (default: both).
+   Single-column → single plot; two columns → side-by-side subplots.
    """
    finished = df[(df[STATUS_FIELD] == FINISHED_STATUS) &
                  (df[COORDINATOR_TYPE_FIELD] == coordinator) &
@@ -241,12 +274,17 @@ def plot_scaling_curves(df: pd.DataFrame, output_dir: Path,
    if not drone_counts:
       return
 
-   columns = [("mean_step_time_s", "Mean Step Time [s]"),
-              ("wall_time_s", "Wall Time [s]")]
+   if columns is None:
+      columns = SCALING_COLUMNS_ALL
+   ncols = len(columns)
+   if figsize is None:
+      figsize = (IEEE_FULL_WIDTH, 2.8) if ncols > 1 else (IEEE_COL_WIDTH, 2.8)
    color = COLOR_BY_DRONE_INDEX[COMBO_COLOR_INDEX.get(
       (coordinator, controller), SINGLE_COLOR_INDEX.get(coordinator, 1))]
 
-   fig, axes = plt.subplots(1, 2, figsize=figsize)
+   fig, axes = plt.subplots(1, ncols, figsize=figsize)
+   if ncols == 1:
+      axes = [axes]
    for ax, (col, ylabel) in zip(axes, columns):
       means, stds, counts = [], [], []
       for n in drone_counts:
@@ -258,7 +296,7 @@ def plot_scaling_curves(df: pd.DataFrame, output_dir: Path,
       means_arr = np.array(means)
       stds_arr = np.array(stds)
 
-      ax.plot(drone_counts, means_arr, "o-", color=color, linewidth=2, markersize=5)
+      ax.plot(drone_counts, means_arr, "o-", color=color, linewidth=1.2, markersize=3)
       lower = means_arr - stds_arr
       if log_scale:
          lower = np.maximum(lower, means_arr * 0.05)  # clamp to 5% of mean for log scale
@@ -269,37 +307,41 @@ def plot_scaling_curves(df: pd.DataFrame, output_dir: Path,
 
       # Annotate sample counts
       for x, y, c in zip(drone_counts, means_arr, counts):
-         ax.annotate(f"n={c}", (x, y), textcoords="offset points",
-                     xytext=(0, 10), ha="center", fontsize=7, color="gray")
+         # f"n={c}"
+         ax.annotate("", (x, y), textcoords="offset points",
+                     xytext=(0, 8), ha="center", fontsize=6, color="gray")
 
-      ax.set_xlabel("Number of Drones $N$", fontsize=12)
-      ax.set_ylabel(ylabel, fontsize=12)
+      ax.set_xlabel("Number of Drones $N$")
+      ax.set_ylabel(ylabel)
       if log_scale:
          ax.set_yscale("log")
       ax.grid(alpha=0.3)
 
    coord_label = LABELS.get(coordinator, coordinator)
    ctrl_label = LABELS.get(controller, controller)
-   fig.suptitle(f"Scaling: {coord_label} / {ctrl_label}", fontsize=13)
+   if show_title:
+      fig.suptitle(f"Scaling: {coord_label} / {ctrl_label}")
    fig.tight_layout()
 
    suffix = "_log" if log_scale else ""
-   base = f"scaling_{coordinator}_{controller}_{n_range}{suffix}"
+   col_suffix = "_" + "_".join(c[0] for c in columns) if len(columns) != len(SCALING_COLUMNS_ALL) else ""
+   base = f"scaling_{coordinator}_{controller}_{n_range}{col_suffix}{suffix}"
    for ext, kwargs in [("png", dict(dpi=300)), ("eps", dict(format="eps"))]:
       fig.savefig(output_dir / f"{base}.{ext}", **kwargs)
    print(f"Saved {output_dir / base}.png  (+eps)")
    plt.close(fig)
 
 
-def plot_all_four_deadlock(df: pd.DataFrame, output_dir: Path, n_drones_range: range | list[int] | None = None, figsize: tuple[float, float] = (12, 5)) -> None:
+def plot_all_four_deadlock(df: pd.DataFrame, output_dir: Path, n_drones_range: range | list[int] | None = None, figsize: tuple[float, float] = (IEEE_FULL_WIDTH, 2.8), show_title: bool = True) -> None:
    """Deadlock bar chart with all 4 combos (2 coordinators x 2 controllers) side by side."""
    n_range = n_drones_range if n_drones_range is not None else sorted(df[N_DRONES_FIELD].unique())
    _deadlock_by_specific_coordinator_list_and_specific_controller_list_for_n_drones_range(df=df, output_dir=output_dir,
          coordinator_list=COORDINATOR_TYPES, controller_list=SPHERE_TYPES, n_drones_range=n_range, title="Deadlock Rate: All Coordinators & Controllers",
-         filename_base="deadlock_rate_all4", figsize=figsize, )
+         filename_base="deadlock_rate_all4", figsize=figsize, show_title=show_title)
 
 
-def main(metrics_csv: Path | None = None) -> None:
+def main(metrics_csv: Path | None = None, show_title: bool = True, font_scale: float = 1.0) -> None:
+   set_font_scale(font_scale)
    METRICS_CSV = Path(__file__).resolve().parent / "paper2_results" / "results_hetzner" / "metrics.csv" if metrics_csv is None else Path(
          __file__).resolve().parent / "paper2_results" / metrics_csv / "metrics.csv"
    OUTPUT_DIR = Path(__file__).resolve().parent / "paper2_results" / "results_hetzner" / "plots" if metrics_csv is None else Path(
@@ -317,30 +359,37 @@ def main(metrics_csv: Path | None = None) -> None:
    n_range = range(2, 12)
    n_range_all = range(2, 25)
 
-   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range, field="mean_step_time")
-   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range, field="arrival")
-   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range_all, field="mean_step_time")
-   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range_all, field="arrival")
+   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range, field="mean_step_time", show_title=show_title)
+   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range, field="arrival", show_title=show_title)
+   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range_all, field="mean_step_time", show_title=show_title)
+   plot_coord_and_sphere_combination(df, OUTPUT_DIR, n_drones_range=n_range_all, field="arrival", show_title=show_title)
 
    # All 4 combos (2 coordinators x 2 controllers) direct comparison
-   plot_all_four_comparison(df, OUTPUT_DIR, column="mean_step_time_s", ylabel="Mean Step Time [s]", title_prefix="Mean Step Time", filename_base=f"mean_step_time{n_range}", n_drones_range=n_range)
-   plot_all_four_comparison(df, OUTPUT_DIR, column="wall_time_s", ylabel="Wall Time [s]", title_prefix="Wall Time", filename_base=f"wall_time{n_range}", n_drones_range=n_range)
-   plot_all_four_comparison(df, OUTPUT_DIR, column="steps", ylabel="Arrival Time [steps]", title_prefix="Arrival Time", filename_base=f"arrival_time{n_range}", n_drones_range=n_range)
-   plot_all_four_comparison(df, OUTPUT_DIR, column="mean_step_time_s", ylabel="Mean Step Time [s]", title_prefix="Mean Step Time", filename_base=f"mean_step_time{n_range_all}", n_drones_range=n_range_all)
-   plot_all_four_comparison(df, OUTPUT_DIR, column="wall_time_s", ylabel="Wall Time [s]", title_prefix="Wall Time", filename_base=f"wall_time{n_range_all}", n_drones_range=n_range_all)
-   plot_all_four_comparison(df, OUTPUT_DIR, column="steps", ylabel="Arrival Time [steps]", title_prefix="Arrival Time", filename_base=f"arrival_time{n_range_all}", n_drones_range=n_range_all)
+   plot_all_four_comparison(df, OUTPUT_DIR, column="mean_step_time_s", ylabel="Mean Step Time [s]", title_prefix="Mean Step Time", filename_base=f"mean_step_time{n_range}", n_drones_range=n_range, show_title=show_title, figsize=(IEEE_COL_WIDTH*2.5, 4.8))
+   plot_all_four_comparison(df, OUTPUT_DIR, column="wall_time_s", ylabel="Wall Time [s]", title_prefix="Wall Time", filename_base=f"wall_time{n_range}", n_drones_range=n_range, show_title=show_title)
+   plot_all_four_comparison(df, OUTPUT_DIR, column="steps", ylabel="Arrival Time [steps]", title_prefix="Arrival Time", filename_base=f"arrival_time{n_range}", n_drones_range=n_range, show_title=show_title)
+   plot_all_four_comparison(df, OUTPUT_DIR, column="mean_step_time_s", ylabel="Mean Step Time [s]", title_prefix="Mean Step Time", filename_base=f"mean_step_time{n_range_all}", n_drones_range=n_range_all, show_title=show_title, figsize=(IEEE_COL_WIDTH*2.2, 3.0))
+   plot_all_four_comparison(df, OUTPUT_DIR, column="wall_time_s", ylabel="Wall Time [s]", title_prefix="Wall Time", filename_base=f"wall_time{n_range_all}", n_drones_range=n_range_all, show_title=show_title)
+   plot_all_four_comparison(df, OUTPUT_DIR, column="steps", ylabel="Arrival Time [steps]", title_prefix="Arrival Time", filename_base=f"arrival_time{n_range_all}", n_drones_range=n_range_all, show_title=show_title)
 
-   plot_all_four_deadlock(df, OUTPUT_DIR, n_drones_range=n_range)
-   plot_all_four_deadlock(df, OUTPUT_DIR, n_drones_range=n_range_all)
+   plot_all_four_deadlock(df, OUTPUT_DIR, n_drones_range=n_range, show_title=show_title, figsize=(IEEE_COL_WIDTH*2.2, 3.0))
+   plot_all_four_deadlock(df, OUTPUT_DIR, n_drones_range=n_range_all, show_title=show_title, figsize=(IEEE_COL_WIDTH*2.2, 3.0))
 
    # Scaling curves: mean_step_time & wall_time vs N
    for coord, ctrl in [("mpc_central", "mpc_agent_adaptive"), ("dmpc_admm", "mpc_agent_adaptive")]:
       for log in [False, True]:
-         plot_scaling_curves(df, OUTPUT_DIR, coordinator=coord, controller=ctrl, n_drones_range=n_range, log_scale=log)
-         plot_scaling_curves(df, OUTPUT_DIR, coordinator=coord, controller=ctrl, n_drones_range=n_range_all, log_scale=log)
+         plot_scaling_curves(df, OUTPUT_DIR, columns=[("wall_time_s", "Wall Time [s]")], coordinator=coord, controller=ctrl, n_drones_range=n_range,
+                             log_scale=log, figsize=(IEEE_COL_WIDTH*1.5, 3.5), show_title=show_title)
+         plot_scaling_curves(df, OUTPUT_DIR, columns=[("wall_time_s", "Wall Time [s]")], coordinator=coord, controller=ctrl, n_drones_range=n_range_all,
+                             log_scale=log, figsize=(IEEE_COL_WIDTH*1.5, 3.5), show_title=show_title)
+         plot_scaling_curves(df, OUTPUT_DIR, columns=[("mean_step_time_s", "Mean Step Time [s]")], coordinator=coord, controller=ctrl, n_drones_range=n_range,
+                             log_scale=log, figsize=(IEEE_COL_WIDTH*1.5, 3.5), show_title=show_title)
+         plot_scaling_curves(df, OUTPUT_DIR, columns=[("mean_step_time_s", "Mean Step Time [s]")], coordinator=coord, controller=ctrl, n_drones_range=n_range_all,
+                             log_scale=log, figsize=(IEEE_COL_WIDTH*1.5, 3.5), show_title=show_title)
+
 
    print("\nDone.")
 
 
 if __name__ == "__main__":
-   main()
+   main(metrics_csv="results_hetzner", show_title=False, font_scale=2.5)
