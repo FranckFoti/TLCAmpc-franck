@@ -354,12 +354,12 @@ If you use this code or build upon our work, please cite our paper:
 }
 ```
 
-### release v2.0.0 
+### release v2.2.1
 ```bibtex
-@article{tlmpc,
+@article{muemken2026,
     title={},
     author={Mümken, Linda and Schwung, Andreas},
-    journal={},
+    journal={IEEE Transactions on Automation Science and Engineering},
     yeat = {2026},
     issn = {},
     doi = {}
