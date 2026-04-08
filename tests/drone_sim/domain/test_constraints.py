@@ -1123,8 +1123,8 @@ class TestSafetyRadiusLSTMBranch:
         drone = _make_drone(safety_zone=1.0, alpha=0.5)  # safety_zone_mode="fixed" by default
         vel = np.array([4.0, 0.0, 0.0])
         result = _safety_radius(drone, velocity=vel)
-        # alpha=0.5, ||v||^2=16, u_max_scalar=3.0, s_stop=8/3, r=0.2+0.5*(8/3)=1.5333
-        expected = 0.2 + 0.5 * (16.0 / (2.0 * 3.0))
+        # alpha=0.5, ||v||^2=16, u_max_scalar=3.0, s_stop=16/6, r=safety_zone+alpha*s_stop=1.0+0.5*(16/6)
+        expected = 1.0 + 0.5 * (16.0 / (2.0 * 3.0))
         assert result == pytest.approx(expected)
 
 

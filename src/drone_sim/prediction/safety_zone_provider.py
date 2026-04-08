@@ -132,5 +132,5 @@ class LSTMSafetyZoneProvider:
       """
       X = torch.from_numpy(window).float().unsqueeze(0)  # (1, m, n)
       with torch.inference_mode():
-         _, sigma_t = self._model(X, Y_gt=None, teacher_forcing_ratio=0.0)
+         _, sigma_t, _, _ = self._model(X, Y_gt=None, teacher_forcing_ratio=0.0)
       return sigma_t.squeeze(0).numpy()  # (T, n)

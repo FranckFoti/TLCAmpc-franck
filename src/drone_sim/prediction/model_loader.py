@@ -6,7 +6,7 @@ in eval mode, and provides CPU-only inference via the `model` property.
 Usage:
    loader = LSTMModelLoader(Path("checkpoints/avlstm.pt"))
    with torch.inference_mode():
-      mu, sigma = loader.model(X_hat, Y_gt=None, teacher_forcing_ratio=0.0)
+      mu, sigma, mu_z, logvar_z = loader.model(X_hat, Y_gt=None, teacher_forcing_ratio=0.0)
 """
 from __future__ import annotations
 

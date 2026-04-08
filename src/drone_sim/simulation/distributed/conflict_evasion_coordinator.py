@@ -53,6 +53,7 @@ class ConflictEvasionDistributedCoordinator(DistributedMPCCoordinator):
         obstacles: list[tuple[np.ndarray, np.ndarray]],
         room_min: np.ndarray | None = None,
         room_max: np.ndarray | None = None,
+        lstm_provider: object | None = None,
     ) -> dict[str, np.ndarray]:
         """Solve with pre-solve conflict detection and evasion waypoint injection.
 
@@ -106,6 +107,7 @@ class ConflictEvasionDistributedCoordinator(DistributedMPCCoordinator):
             obstacles=obstacles,
             room_min=room_min,
             room_max=room_max,
+            lstm_provider=lstm_provider,
         )
 
         # 6. Restore modified routes

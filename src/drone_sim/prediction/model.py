@@ -1,4 +1,4 @@
-"""AV-LSTM trajectory prediction model.
+"""AV-LSTM trajectory prediction model (VAE variant).
 
 Implements the architecture from:
   Hybrid Neural Trajectory Forecasting with Uncertainty-Aware Safety Zone
@@ -8,10 +8,12 @@ Architecture:
   1. Linear embedding: (batch, m, n) -> (batch, m, d)
   2. Sinusoidal positional encoding: adds PE to embedded sequence
   3. TransformerEncoder: L=2 layers, H_heads=1, d_model=64, batch_first=True
-  4. LSTM init: h0 from mean-pool of encoder output, c0 from max-pool
-  5. LSTM Decoder: input_size=n, hidden_size=128, autoregressive T=80 steps
-  6. Output heads: mu = Linear(h_lstm, n), sigma via softplus + sigma_min floor
-  7. Teacher forcing: per-step coin flip using torch.rand(1).item()
+  4. Variational bottleneck: Q(z|X) = N(mu_z, diag(exp(logvar_z)))
+     z sampled via reparameterization (training) or z = mu_z (inference)
+  5. LSTM init: h0, c0 derived from z via linear projection + tanh
+  6. LSTM Decoder: input_size=n, hidden_size=128, autoregressive T=80 steps
+  7. Output heads: mu = Linear(h_lstm, n), sigma via softplus + sigma_min floor
+  8. Teacher forcing: per-step coin flip using torch.rand(1).item()
 """
 from __future__ import annotations
 
@@ -56,10 +58,11 @@ class SinusoidalPositionalEncoding(nn.Module):
 
 
 class AVLSTMModel(nn.Module):
-   """Attention-Velocity LSTM model for probabilistic trajectory prediction.
+   """Attention-Velocity LSTM model with variational bottleneck (VAE).
 
-   Encodes a noisy history sequence with a Transformer Encoder, then
-   autoregressively decodes ``T`` future steps using an LSTM, producing
+   Encodes a noisy history sequence with a Transformer Encoder, maps it
+   through a latent bottleneck z ~ Q(z|X) = N(mu_z, diag(exp(logvar_z))),
+   then autoregressively decodes ``T`` future steps using an LSTM, producing
    Gaussian mean (``mu``) and standard-deviation (``sigma``) outputs.
 
    The sigma output is guaranteed to be >= ``sigma_min`` everywhere via
@@ -73,13 +76,15 @@ class AVLSTMModel(nn.Module):
        h_lstm:      LSTM hidden state dimension (default: 128).
        T:           Prediction horizon in steps (default: 80).
        sigma_min:   Minimum sigma value to prevent collapse (default: 0.01).
+       d_z:         Latent space dimension for the VAE bottleneck (default: 32).
    """
 
-   def __init__(self, n: int = 6, d: int = 64, L: int = 2, H_heads: int = 1, h_lstm: int = 128, T: int = 80, sigma_min: float = 0.3) -> None:
+   def __init__(self, n: int = 6, d: int = 64, L: int = 2, H_heads: int = 1, h_lstm: int = 128, T: int = 80, sigma_min: float = 0.3, d_z: int = 32) -> None:
       super().__init__()
       self.T = T
       self.n = n
       self.sigma_min = sigma_min
+      self.d_z = d_z
 
       # Stage 1: Embedding + positional encoding + Transformer Encoder
       self.embedding = nn.Linear(n, d)
@@ -87,13 +92,15 @@ class AVLSTMModel(nn.Module):
       encoder_layer = nn.TransformerEncoderLayer(d_model=d, nhead=H_heads, batch_first=True, dropout=0.0)
       self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=L)
 
-      # Stage 2: LSTM state initialisation from encoder output
-      #   h0 = tanh(W_h @ Mean(E_out))   — mean pool over time
-      #   c0 = tanh(W_c @ Max(E_out))    — max pool over time
-      self.h_init = nn.Linear(d, h_lstm)
-      self.c_init = nn.Linear(d, h_lstm)
+      # Variational posterior: Q(z|X) = N(mu_z, diag(exp(logvar_z)))
+      self.mu_z_head = nn.Linear(d, d_z)
+      self.logvar_z_head = nn.Linear(d, d_z)
 
-      # Stage 2: Autoregressive LSTM decoder
+      # LSTM state initialisation from latent z
+      self.h_init = nn.Linear(d_z, h_lstm)
+      self.c_init = nn.Linear(d_z, h_lstm)
+
+      # Autoregressive LSTM decoder
       # input_size=n because each step receives the raw state vector
       self.lstm = nn.LSTM(input_size=n, hidden_size=h_lstm, batch_first=True)
 
@@ -101,7 +108,7 @@ class AVLSTMModel(nn.Module):
       self.mu_head = nn.Linear(h_lstm, n)
       self.sigma_head = nn.Linear(h_lstm, n)
 
-   def forward(self, X_hat: torch.Tensor, Y_gt: torch.Tensor | None = None, teacher_forcing_ratio: float = 1.0) -> tuple[torch.Tensor, torch.Tensor]:
+   def forward(self, X_hat: torch.Tensor, Y_gt: torch.Tensor | None = None, teacher_forcing_ratio: float = 1.0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
       """Run the model forward pass.
 
       Args:
@@ -115,8 +122,11 @@ class AVLSTMModel(nn.Module):
                  Uses ``torch.rand(1).item()`` for the per-step coin flip.
 
       Returns:
-          A tuple ``(mu, sigma)`` each of shape ``(batch, T, n)``.
-          ``sigma >= sigma_min`` everywhere.
+          A tuple ``(mu, sigma, mu_z, logvar_z)``.
+          - ``mu, sigma``: each of shape ``(batch, T, n)``.
+            ``sigma >= sigma_min`` everywhere.
+          - ``mu_z, logvar_z``: each of shape ``(batch, d_z)``.
+            Variational posterior parameters for the KL term.
       """
       # ------------------------------------------------------------------
       # Stage 1: Embed, encode via Transformer
@@ -126,14 +136,25 @@ class AVLSTMModel(nn.Module):
       E_out = self.transformer(E)  # (batch, m, d)
 
       # ------------------------------------------------------------------
-      # LSTM hidden state initialisation
-      #   mean-pool → h0,  max-pool → c0
-      # nn.LSTM expects hidden shape: (num_layers=1, batch, h_lstm)
+      # Variational bottleneck: Q(z|X) = N(mu_z, diag(exp(logvar_z)))
       # ------------------------------------------------------------------
-      h0 = torch.tanh(self.h_init(E_out.mean(dim=1)))  # (batch, h_lstm)
-      c0 = torch.tanh(self.c_init(E_out.max(dim=1).values))  # (batch, h_lstm)
-      h = h0.unsqueeze(0)  # (1, batch, h_lstm)
-      c = c0.unsqueeze(0)  # (1, batch, h_lstm)
+      e = E_out.mean(dim=1)                             # (batch, d)
+      mu_z = self.mu_z_head(e)                          # (batch, d_z)
+      logvar_z = self.logvar_z_head(e)                  # (batch, d_z)
+
+      # Reparameterization trick (sample during training, use mean at inference)
+      if self.training:
+         std_z = torch.exp(0.5 * logvar_z)              # (batch, d_z)
+         z = mu_z + std_z * torch.randn_like(std_z)     # (batch, d_z)
+      else:
+         z = mu_z                                       # deterministic
+
+      # LSTM hidden state from z
+      # nn.LSTM expects hidden shape: (num_layers=1, batch, h_lstm)
+      h0 = torch.tanh(self.h_init(z))                  # (batch, h_lstm)
+      c0 = torch.tanh(self.c_init(z))                  # (batch, h_lstm)
+      h = h0.unsqueeze(0)                              # (1, batch, h_lstm)
+      c = c0.unsqueeze(0)                              # (1, batch, h_lstm)
 
       # ------------------------------------------------------------------
       # Stage 2: Autoregressive LSTM decoding
@@ -167,4 +188,4 @@ class AVLSTMModel(nn.Module):
 
       mu = torch.stack(mus, dim=1)  # (batch, T, n)
       sigma = torch.stack(sigmas, dim=1)  # (batch, T, n)
-      return mu, sigma
+      return mu, sigma, mu_z, logvar_z

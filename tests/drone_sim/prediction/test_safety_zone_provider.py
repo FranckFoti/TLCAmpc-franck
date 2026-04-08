@@ -219,7 +219,9 @@ class TestLSTMSafetyZoneProviderLookAhead:
       mock_model = MagicMock()
       mu_out = torch.zeros(1, T, 6)
       sigma_out = torch.tensor(sigma_profile, dtype=torch.float32).unsqueeze(0)  # (1, T, 6)
-      mock_model.return_value = (mu_out, sigma_out)
+      mu_z_out = torch.zeros(1, 32)
+      logvar_z_out = torch.zeros(1, 32)
+      mock_model.return_value = (mu_out, sigma_out, mu_z_out, logvar_z_out)
 
       # Mock loader
       mock_loader = MagicMock()

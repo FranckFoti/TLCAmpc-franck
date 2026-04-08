@@ -87,7 +87,9 @@ class TestLSTMModelLoader:
 
       dummy_input = torch.randn(1, 20, 6)
       with torch.inference_mode():
-         mu, sigma = loader.model(dummy_input, Y_gt=None, teacher_forcing_ratio=0.0)
+         mu, sigma, mu_z, logvar_z = loader.model(dummy_input, Y_gt=None, teacher_forcing_ratio=0.0)
 
       assert mu.shape == (1, 80, 6), f"Expected mu shape (1, 80, 6), got {mu.shape}"
       assert sigma.shape == (1, 80, 6), f"Expected sigma shape (1, 80, 6), got {sigma.shape}"
+      assert mu_z.shape == (1, 32), f"Expected mu_z shape (1, 32), got {mu_z.shape}"
+      assert logvar_z.shape == (1, 32), f"Expected logvar_z shape (1, 32), got {logvar_z.shape}"

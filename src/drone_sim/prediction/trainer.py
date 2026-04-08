@@ -68,8 +68,9 @@ class AVLSTMTrainer:
 
    Configures:
      - Optimizer:  Adam with ``lr``
-     - Loss:       ``GaussianNLLLoss(reduction="mean")`` — expects *variance*
-                   (``sigma ** 2``), not standard deviation
+     - Loss:       ELBO = ``GaussianNLLLoss`` (reconstruction) + ``beta * KL``
+                   (regularisation). GaussianNLLLoss expects *variance*
+                   (``sigma ** 2``), not standard deviation.
      - Scheduler:  ``ReduceLROnPlateau(mode="min", factor=0.1, patience=10)``
      - Sampling:   linear teacher-forcing annealing from 1.0 → 0.0 over epochs
 
@@ -79,11 +80,14 @@ class AVLSTMTrainer:
        n_epochs:   Total number of training epochs (default: 50).
        lr:         Adam learning rate (default: 1e-3).
        batch_size: Mini-batch size for DataLoader (default: 64).
+       beta:       KL divergence weight (default: 1.0). Set to 0 to disable
+                   the KL term (pure NLL). Values < 1 correspond to beta-VAE.
    """
 
-   def __init__(self, model: AVLSTMModel, data_dir: Path, n_epochs: int = 50, lr: float = 1e-3, batch_size: int = 64) -> None:
+   def __init__(self, model: AVLSTMModel, data_dir: Path, n_epochs: int = 50, lr: float = 1e-3, batch_size: int = 64, beta: float = 1.0) -> None:
       self.model = model
       self.n_epochs = n_epochs
+      self.beta = beta
 
       self.dataset = TrajectoryDataset(data_dir)
       self.loader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True, num_workers=0)
@@ -131,12 +135,13 @@ class AVLSTMTrainer:
          self.optimizer.zero_grad()
 
          Y_target = Y_batch[:, : self.model.T, :]  # slice to model's T if data has more steps
-         mu, sigma = self.model(X_batch, Y_target, teacher_forcing_ratio)
+         mu, sigma, mu_z, logvar_z = self.model(X_batch, Y_target, teacher_forcing_ratio)
 
-         # GaussianNLLLoss expects variance (sigma^2), not std deviation
-         var = sigma ** 2
-
-         loss = self.criterion(mu, Y_target, var)
+         # ELBO = NLL (reconstruction) + beta * KL (regularisation)
+         var = sigma ** 2  # GaussianNLLLoss expects variance, not std deviation
+         nll = self.criterion(mu, Y_target, var)
+         kl = -0.5 * torch.mean(1 + logvar_z - mu_z.pow(2) - logvar_z.exp())
+         loss = nll + self.beta * kl
          loss.backward()
          self.optimizer.step()
 
