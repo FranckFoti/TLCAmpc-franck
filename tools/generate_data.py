@@ -28,8 +28,8 @@ import sys
 from pathlib import Path
 
 from drone_sim.domain.config import ControllerSpec, PhysicsSpec, RoomConfig, ScenarioConfig, DroneConfig
-from utility.constants import _COLOR_BY_DRONE_INDEX
-from utility.generate_sphere_positions import generate_positions
+from tools.utility.constants import COLOR_BY_DRONE_INDEX
+from tools.utility.generate_sphere_positions import generate_positions
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -58,7 +58,7 @@ def create_scenario(dt: float = 0.1, physics_v: float = 3.0, physics_u: float = 
    room = RoomConfig(min=[-room_size/2, -room_size/2, -room_size/2], max=[room_size/2, room_size/2, room_size/2])
    waypoints = generate_positions(n_drones=n_drones, room_min=room.min, room_max=room.max, min_pair_distance=safety_zone*2, wall_margin=safety_zone)
    drones = [DroneConfig(drone_id=f"drone-{i}", start=waypoints[i][0], target=waypoints[i][1], controller=controller, physics="default",
-                         radius=drones_radius, safety_zone=safety_zone, cons_stop=0.0, alpha=None, drone_color=_COLOR_BY_DRONE_INDEX[i + 1]) for i in range(n_drones)]
+                         radius=drones_radius, safety_zone=safety_zone, cons_stop=0.0, alpha=None, drone_color=COLOR_BY_DRONE_INDEX[i + 1]) for i in range(n_drones)]
 
    cfg = ScenarioConfig(dt=dt, physics=physics, controller=controller, coordinator=coordinator_spec, comm_radius=None, obstacles=[], room=room, drones=drones)
    return cfg

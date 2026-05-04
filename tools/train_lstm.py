@@ -37,6 +37,8 @@ def _build_parser() -> argparse.ArgumentParser:
    p.add_argument("--sigma_min", type=int, default=0.85, metavar="sigma_min", help="Avoid floor collapse with a weight close to 0.1, more collapse with smaller weights")
    p.add_argument("--h_lstm", type=int, default=128, metavar="h_lstm", help="hidden dimension")
    p.add_argument("--L", type=int, default=2, metavar="L", help="Encoder Layer")
+   p.add_argument("--d-z", type=int, default=32, metavar="D_Z", help="Latent dimension for the VAE bottleneck.")
+   p.add_argument("--beta", type=float, default=1.0, metavar="BETA", help="KL divergence weight (1.0 = standard ELBO, 0.0 = NLL only).")
    return p
 
 
@@ -56,9 +58,9 @@ def main() -> None:
    # ------------------------------------------------------------------
    # Build model and trainer
    # ------------------------------------------------------------------
-   model = AVLSTMModel(T=args.T, sigma_min=args.sigma_min, L=args.L, h_lstm=args.h_lstm)
+   model = AVLSTMModel(T=args.T, sigma_min=args.sigma_min, L=args.L, h_lstm=args.h_lstm, d_z=args.d_z)
 
-   trainer = AVLSTMTrainer(model, args.data_dir, n_epochs=args.epochs, lr=args.lr, batch_size=args.batch_size)
+   trainer = AVLSTMTrainer(model, args.data_dir, n_epochs=args.epochs, lr=args.lr, batch_size=args.batch_size, beta=args.beta)
 
    log.info("Starting training — dataset_size=%d, epochs=%d, lr=%s, batch_size=%d", len(trainer.dataset), args.epochs, args.lr, args.batch_size)
 
