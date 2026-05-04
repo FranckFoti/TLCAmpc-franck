@@ -63,6 +63,8 @@ class Simulator:
    # LSTM trajectory prediction infrastructure (None when not configured).
    _lstm_history: object | None = field(default=None, init=False, repr=False)
    _lstm_provider: object | None = field(default=None, init=False, repr=False)
+   # BoF (Backoff-Function) trajectory/uncertainty provider (None when not configured).
+   _bof_provider: object | None = field(default=None, init=False, repr=False)
 
    @classmethod
    def from_config(cls, cfg: ScenarioConfig) -> "Simulator":
@@ -152,6 +154,13 @@ class Simulator:
          sim._lstm_provider = LSTMSafetyZoneProvider(_loader, _propagator, _lstm_history, horizon=_horizon, # lstm_look_ahead is deprecated!
                look_ahead=cfg.lstm_look_ahead, )
 
+      # Instantiate BoF (Backoff-Function) provider when enabled. Parallel to
+      # the LSTM provider; the colleague fills in BoFSafetyZoneProvider._call_bof_tool.
+      if getattr(cfg, "bof_enabled", False):
+         from drone_sim.prediction import BoFSafetyZoneProvider
+         _horizon = cfg.coordinator.params.get("horizon", 5) if cfg.coordinator else 5
+         sim._bof_provider = BoFSafetyZoneProvider(horizon=_horizon)
+
       # Initialize traces with the start positions.
       sim.traces = {d.drone_id: [d.position().copy()] for d in sim.drones}
       sim.last_collisions = sim._compute_collisions()
@@ -228,7 +237,7 @@ class Simulator:
          # Then override optimized drones with coordinator outputs.
          try:
             u_by_id = self.coordinator.solve_controls(drones=self.drones, obstacles=self.obstacles, room_min=self.room_min, room_max=self.room_max,
-                  lstm_provider=self._lstm_provider, )
+                  lstm_provider=(self._bof_provider or self._lstm_provider), )
 
          except RuntimeError as exc:
             # Mark the step as infeasible (e.g. walls/obstacles make the optimization problem infeasible) and abort this step without advancing the

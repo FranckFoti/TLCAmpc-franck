@@ -112,3 +112,9 @@ class ScenarioConfig(BaseModel):
    # accumulated uncertainty, typically 3-5x larger than first-step sigma.
    # Start with 20 for H=4, T=80 models; increase if floor still dominates.
    lstm_look_ahead: int | None = None
+
+   # Enable the BoF (Backoff-Function) safety-zone provider as a parallel
+   # alternative to the LSTM provider. When True, BoFSafetyZoneProvider is
+   # instantiated and supplied to coordinators in place of the LSTM one.
+   # The actual tool call lives in BoFSafetyZoneProvider._call_bof_tool.
+   bof_enabled: bool = False
