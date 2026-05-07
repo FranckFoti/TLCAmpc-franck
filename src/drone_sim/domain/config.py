@@ -4,8 +4,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from drone_sim.simulation.coordinator import Coordinator
-
 ColorValue = str | list[float]
 
 
