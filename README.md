@@ -7,9 +7,16 @@ The configuration files under `configs/basic_paper` implement the MPC framework 
 
 Requirement: Python 3.11+ (or a compatible version).
 
+macOS/linux:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install -e ".[dev]"
+```
+windows:
+```bash
+python -m venv .venv
+call .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
