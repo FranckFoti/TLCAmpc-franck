@@ -70,13 +70,11 @@ def _create_scenario(config_path: str | Path | None, params: dict[str, str] | No
 
    return scenario
 
-def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | None, steps: int, step_n: int, sleep_s: float, trace_len: int,
-                  width: int, height: int, dpi: int, elev: float, azim: float, record_dir: str | Path | None, gif_path: str | Path | None, gif_fps: float,
-                  obj_name: str | None=None) -> None:
-   scenario = _create_scenario(config_path=config_path, params=params)
-
-   sim = Simulator.from_config(scenario)
-
+def live_view_simulator(sim: Simulator, *, steps: int, step_n: int, sleep_s: float, trace_len: int,
+                        width: int, height: int, dpi: int, elev: float, azim: float,
+                        record_dir: str | Path | None, gif_path: str | Path | None, gif_fps: float,
+                        obj_name: str | None = None, show_live: bool = True) -> None:
+   """Step ``sim`` and render frames; optionally show a live matplotlib window and/or save PNGs/GIF."""
    record_path = Path(record_dir) if record_dir is not None else None
    if record_path is not None:
       record_path.mkdir(parents=True, exist_ok=True)
@@ -85,11 +83,13 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
 
    frames: list[Image.Image] = []
 
-   plt.ion()
-   fig, ax = plt.subplots()
-   ax.set_axis_off()
-
+   fig = None
+   ax = None
    img_artist = None
+   if show_live:
+      plt.ion()
+      fig, ax = plt.subplots()
+      ax.set_axis_off()
 
    all_reached = False
    for i in range(steps):
@@ -138,12 +138,12 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
                              obj_path=obj_path, obj_scale=0.5, draw_sphere_if_obj=False
                              )
 
-      # For display
-      img = mpimg.imread(io.BytesIO(png_bytes), format="png")
-      if img_artist is None:
-         img_artist = ax.imshow(img)
-      else:
-         img_artist.set_data(img)
+      if show_live:
+         img = mpimg.imread(io.BytesIO(png_bytes), format="png")
+         if img_artist is None:
+            img_artist = ax.imshow(img)
+         else:
+            img_artist.set_data(img)
 
       # For recording
       if record_path is not None or gif_out is not None:
@@ -154,8 +154,9 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
          if gif_out is not None:
             frames.append(pil_img)
 
-      fig.canvas.draw_idle()
-      plt.pause(0.001)
+      if show_live:
+         fig.canvas.draw_idle()
+         plt.pause(0.001)
 
       if sleep_s > 0:
          time.sleep(sleep_s)
@@ -163,8 +164,9 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
       all_reached = all_drones_reached_destination(sim.drones)
       print(f"All drones reached: {all_reached}")
 
-   plt.ioff()
-   plt.show()
+   if show_live:
+      plt.ioff()
+      plt.show()
 
    if gif_out is not None:
       if not frames:
@@ -172,6 +174,17 @@ def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | No
       duration_ms = int(round(1000.0 / max(0.1, float(gif_fps))))
       gif_out.parent.mkdir(parents=True, exist_ok=True)
       frames[0].save(gif_out, save_all=True, append_images=frames[1:], duration=duration_ms, loop=0, optimize=False)
+
+
+def run_live_view(*, config_path: str | Path | None, params: dict[str, str] | None, steps: int, step_n: int, sleep_s: float, trace_len: int,
+                  width: int, height: int, dpi: int, elev: float, azim: float, record_dir: str | Path | None, gif_path: str | Path | None, gif_fps: float,
+                  obj_name: str | None=None) -> None:
+   scenario = _create_scenario(config_path=config_path, params=params)
+   sim = Simulator.from_config(scenario)
+   live_view_simulator(sim, steps=steps, step_n=step_n, sleep_s=sleep_s, trace_len=trace_len,
+                       width=width, height=height, dpi=dpi, elev=elev, azim=azim,
+                       record_dir=record_dir, gif_path=gif_path, gif_fps=gif_fps, obj_name=obj_name,
+                       show_live=True)
 
 
 def _parse_kv_params(items: list[str]) -> dict[str, str]:
