@@ -7,7 +7,7 @@ import numpy as np
 
 from drone_sim.domain.config import ScenarioConfig
 from drone_sim.simulation.simulator import Simulator
-from drone_sim.gui.backend import (SimulationBackend, SimState, DroneState, StepResult, )
+from drone_sim.gui.backend import (SimulationBackend, SimState, DroneState, StepResult, PredictedTrajectory, )
 
 
 class DirectBackend(SimulationBackend):
@@ -80,6 +80,33 @@ class DirectBackend(SimulationBackend):
       if hasattr(sim.coordinator, "get_last_iteration_count"):
          admm_iteration_count = sim.coordinator.get_last_iteration_count()
 
+      # BoF predictions — surface trajectories + radii from the most recent
+      # provider call. LSTM provider doesn't expose trajectories yet, so this
+      # is BoF-only for now. predicted_trajectories is the raw BoF output;
+      # last_radii is the post-processed (floor/cap) version that the planner
+      # actually used as a constraint.
+      predictions: list[PredictedTrajectory] = []
+      provider = getattr(sim, "_bof_provider", None)
+      if provider is not None:
+         trajs = getattr(provider, "predicted_trajectories", {})
+         radii_by_id = getattr(provider, "last_radii", {})
+         drone_by_id = {d.drone_id: d for d in sim.drones}
+         for did, traj in trajs.items():
+            radii = radii_by_id.get(did)
+            drone = drone_by_id.get(did)
+            if radii is None or drone is None:
+               continue
+            safety_color = drone.safety_color if isinstance(drone.safety_color, str) else list(drone.safety_color)
+            core_color = drone.color if isinstance(drone.color, str) else list(drone.color)
+            predictions.append(PredictedTrajectory(
+               drone_id=did,
+               points=np.asarray(traj, dtype=float),
+               radii=np.asarray(radii, dtype=float),
+               color=safety_color,
+               inner_radius=float(drone.radius),
+               core_color=core_color,
+            ))
+
       return StepResult(drones=drone_states, safety_radii=safety_radii, last_collisions=list(sim.last_collisions), infeasible=bool(sim.infeasible),
             infeasible_reason=sim.infeasible_reason, step_count=sim.step_count, t=float(sim.t), all_reached=all_reached,
-            admm_iteration_count=admm_iteration_count)
+            admm_iteration_count=admm_iteration_count, predictions=predictions)

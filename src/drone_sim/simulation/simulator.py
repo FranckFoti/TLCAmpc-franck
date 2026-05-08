@@ -65,6 +65,7 @@ class Simulator:
    _lstm_provider: object | None = field(default=None, init=False, repr=False)
    # BoF (Backoff-Function) trajectory/uncertainty provider (None when not configured).
    _bof_provider: object | None = field(default=None, init=False, repr=False)
+   _bof_history: object | None = field(default=None, init=False, repr=False)
 
    @classmethod
    def from_config(cls, cfg: ScenarioConfig) -> "Simulator":
@@ -155,11 +156,42 @@ class Simulator:
                look_ahead=cfg.lstm_look_ahead, )
 
       # Instantiate BoF (Backoff-Function) provider when enabled. Parallel to
-      # the LSTM provider; the colleague fills in BoFSafetyZoneProvider._call_bof_tool.
+      # the LSTM provider. The adapter (library/REST) is selected from config.
       if getattr(cfg, "bof_enabled", False):
-         from drone_sim.prediction import BoFSafetyZoneProvider
-         _horizon = cfg.coordinator.params.get("horizon", 5) if cfg.coordinator else 5
-         sim._bof_provider = BoFSafetyZoneProvider(horizon=_horizon)
+         from drone_sim.prediction import (
+            TrajectoryHistoryBuffer,
+            BoFSafetyZoneProvider,
+            BoFLibraryAdapter,
+            BoFRestAdapter,
+         )
+         _mpc_horizon = cfg.coordinator.params.get("horizon", 5) if cfg.coordinator else 5
+         _bof_horizon = cfg.bof_horizon
+         if _bof_horizon < _mpc_horizon:
+            raise ValueError(
+               f"bof_horizon ({_bof_horizon}) must be >= MPC horizon ({_mpc_horizon}) — "
+               f"the planner needs at least {_mpc_horizon} per-step radii."
+            )
+         _bof_history = TrajectoryHistoryBuffer(m=cfg.bof_history_size)
+         if cfg.bof_backend == "library":
+            _bof_adapter = BoFLibraryAdapter(
+               horizon=_bof_horizon,
+               has_velocity=cfg.bof_has_velocity,
+               growth_tau=cfg.bof_growth_tau,
+            )
+         else:
+            # Validator on ScenarioConfig guarantees bof_url is set when backend == "rest".
+            _bof_adapter = BoFRestAdapter(
+               url=cfg.bof_url,
+               horizon=_bof_horizon,
+               has_velocity=cfg.bof_has_velocity,
+               growth_tau=cfg.bof_growth_tau,
+            )
+         sim._bof_history = _bof_history
+         sim._bof_provider = BoFSafetyZoneProvider(
+            adapter=_bof_adapter,
+            buffer=_bof_history,
+            horizon=_mpc_horizon,
+         )
 
       # Initialize traces with the start positions.
       sim.traces = {d.drone_id: [d.position().copy()] for d in sim.drones}
@@ -235,6 +267,9 @@ class Simulator:
             us.append(np.asarray(u, dtype=float).reshape(3))
 
          # Then override optimized drones with coordinator outputs.
+         # Drop BoF predictions cached from the previous step so the GUI sees only the current step's tubes (the provider accumulates across the per-ego-drone calls inside solve_controls).
+         if self._bof_provider is not None and hasattr(self._bof_provider, "clear_step_cache"):
+            self._bof_provider.clear_step_cache()
          try:
             u_by_id = self.coordinator.solve_controls(drones=self.drones, obstacles=self.obstacles, room_min=self.room_min, room_max=self.room_max,
                   lstm_provider=(self._bof_provider or self._lstm_provider), )
@@ -275,6 +310,9 @@ class Simulator:
             # Update LSTM history buffer with the new state after clamping.
             if self._lstm_history is not None:
                self._lstm_history.update(d.drone_id, d.x.copy())
+            # Mirror update into the BoF history buffer (independent capacity m).
+            if self._bof_history is not None:
+               self._bof_history.update(d.drone_id, d.x.copy())
 
          self.last_collisions = self._compute_collisions()
 

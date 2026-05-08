@@ -116,3 +116,49 @@ class ScenarioConfig(BaseModel):
    # instantiated and supplied to coordinators in place of the LSTM one.
    # The actual tool call lives in BoFSafetyZoneProvider._call_bof_tool.
    bof_enabled: bool = False
+
+   # Which BoF adapter to use. "library" calls Brian's BoFPredictor in-process
+   # (default — no network IO in the MPC hot path). "rest" POSTs each history
+   # window to a Flask endpoint at ``bof_url``.
+   bof_backend: Literal["library", "rest"] = "library"
+
+   # Endpoint base URL for the REST adapter, e.g. "http://localhost:5005".
+   # Required when ``bof_backend == "rest"``.
+   bof_url: str | None = None
+
+   # When True, forward the velocity columns of the history buffer to BoF
+   # (sends 6 columns instead of 3). The returned trajectory is sliced back
+   # to (H, 3) by the adapter regardless. Default is positions only.
+   bof_has_velocity: bool = False
+
+   # History window size m (rows of [px,py,pz,vx,vy,vz]) the BoF predictor
+   # expects per neighbor. Drives TrajectoryHistoryBuffer capacity.
+   bof_history_size: int = 100
+
+   # How many steps BoF predicts into the future per call. Independent of
+   # the MPC horizon (which controls how far the planner enforces
+   # constraints). The provider takes the first ``coordinator.params.horizon``
+   # radii as the planner's per-step constraint and caches the full
+   # ``bof_horizon``-length trajectory + radii for the GUI prediction tube.
+   # Default 50 ≈ 5 s of lookahead at dt=0.1; bump to 100 for longer tubes.
+   bof_horizon: int = 50
+
+   # Time-decay constant for BoF's per-step σ growth. ``None`` (default)
+   # leaves the predictor's σ flat over the horizon — radii are constant.
+   # When set to a positive float, BoF scales radii by ``sqrt(1 + k/tau)``
+   # at horizon step k, producing growing-funnel uncertainty that flows
+   # through to both the MPC constraint and the GUI tube. Smaller tau =
+   # faster growth (tau≈horizon/4 for visibly cone-shaped tubes).
+   bof_growth_tau: float | None = None
+
+   @model_validator(mode="after")
+   def _validate_bof(self) -> ScenarioConfig:
+      if self.bof_backend == "rest" and not self.bof_url:
+         raise ValueError("bof_url must be set when bof_backend='rest'")
+      if self.bof_history_size <= 0:
+         raise ValueError("bof_history_size must be positive")
+      if self.bof_horizon <= 0:
+         raise ValueError("bof_horizon must be positive")
+      if self.bof_growth_tau is not None and self.bof_growth_tau <= 0:
+         raise ValueError("bof_growth_tau must be positive when set")
+      return self
