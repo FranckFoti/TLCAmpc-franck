@@ -294,7 +294,9 @@ class MainWindow(QMainWindow):
         for pred in result.predictions:
             outer_color = _coerce_color(pred.color)
             inner_color = _coerce_color(pred.core_color)
-            inner_radii = np.full(pred.radii.shape, pred.inner_radius)
+            # DIRTY FIX: halve drone.radius for the inner tube, the rendered tube ends up ~2x too wide compared to drone.radius. Real cause not found yet.
+            # Revert this /2 once the underlying radius/diameter bug is fixed.
+            inner_radii = np.full(pred.radii.shape, pred.inner_radius / 2.0)
 
             draw_prediction_tube(
                 self._ax, pred.points, pred.radii,
@@ -401,7 +403,9 @@ class MainWindow(QMainWindow):
         for pred in result.predictions:
             outer_color = _coerce_color(pred.color)
             inner_color = _coerce_color(pred.core_color)
-            inner_radii = np.full(pred.radii.shape, pred.inner_radius)
+            # DIRTY FIX: halve drone.radius for the inner tube, the rendered tube ends up ~2x too wide compared to drone.radius. Real cause not found yet.
+            # Revert this /2 once the underlying radius/diameter bug is fixed.
+            inner_radii = np.full(pred.radii.shape, pred.inner_radius / 2.0)
             draw_prediction_tube(
                 ax, pred.points, pred.radii,
                 color=outer_color,

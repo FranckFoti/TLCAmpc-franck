@@ -177,7 +177,7 @@ def draw_trace(ax: object, trace: list[np.ndarray]|list[list[float]], trace_colo
 
 
 def draw_prediction_tube(ax: object, points: np.ndarray, radii: np.ndarray, *, color, n_samples: int = 50, n_circumference: int = 14, alpha: float = 0.15,
-      centerline_alpha: float = 0.4, draw_centerline: bool = True, ) -> None:
+                         centerline_alpha: float = 0.4, draw_centerline: bool = True) -> None:
    """Draw a translucent tube around a predicted trajectory polyline.
 
    The tube's centerline follows ``points`` (interpolated to ``n_samples`` evenly spaced points along arc length); the tube radius at each sample is the linearly-interpolated value from ``radii``.
