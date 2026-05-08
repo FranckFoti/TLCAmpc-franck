@@ -85,8 +85,8 @@ class BoFSafetyZoneProvider:
 
          traj_arr = self._last_trajectories[neighbor_id]
          first_pt, last_pt = traj_arr[0, :3], traj_arr[-1, :3]
-         _log.info("BoF provider: neighbor=%s traj %+0.3f,%+0.3f,%+0.3f -> %+0.3f,%+0.3f,%+0.3f (span=%.3fm, bof_H=%d) | mpc radii[:%d] mean=%.3f max=%.3f min=%.3f r_floor=%.3f",
-                   neighbor_id, first_pt[0], first_pt[1], first_pt[2], last_pt[0], last_pt[1], last_pt[2], float(np.linalg.norm(last_pt - first_pt)), traj_arr.shape[0], 
+         _log.debug("BoF provider: neighbor=%s traj %+0.3f,%+0.3f,%+0.3f -> %+0.3f,%+0.3f,%+0.3f (span=%.3fm, bof_H=%d) | mpc radii[:%d] mean=%.3f max=%.3f min=%.3f r_floor=%.3f",
+                   neighbor_id, first_pt[0], first_pt[1], first_pt[2], last_pt[0], last_pt[1], last_pt[2], float(np.linalg.norm(last_pt - first_pt)), traj_arr.shape[0],
                    self._horizon, float(result[neighbor_id].mean()), float(result[neighbor_id].max()), float(result[neighbor_id].min()), r_floor)
 
       return result

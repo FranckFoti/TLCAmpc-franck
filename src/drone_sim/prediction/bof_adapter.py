@@ -51,26 +51,26 @@ def _format_xyz(p: np.ndarray) -> str:
 
 
 def _log_prediction(kind: str, history_sliced: np.ndarray, trajectory: np.ndarray, radii: np.ndarray, *, extra: str = "") -> None:
-   """Emit one INFO summary + one DEBUG full-dump per BoF call.
+   """Emit one DEBUG summary + one DEBUG full-dump per BoF call.
 
    The summary is grep-able and shows the most useful sanity check:
    ``forward`` is the Euclidean distance from the last observed history position to the last predicted point — small values mean the prediction barely
    extends beyond the current position, which combined with r_floor-dominated radii produces a "ring around the drone" tube look.
+   Per-call lines are at DEBUG so the default INFO log stays clean; flip the prediction logger to DEBUG to see them.
    """
-   if not _log.isEnabledFor(logging.INFO):
+   if not _log.isEnabledFor(logging.DEBUG):
       return
    last_hist = history_sliced[-1, :3]
    first_pt = trajectory[0, :3]
    last_pt = trajectory[-1, :3]
    forward = float(np.linalg.norm(last_pt - last_hist))
    step_lens = np.linalg.norm(np.diff(trajectory, axis=0), axis=1) if trajectory.shape[0] > 1 else np.zeros(1)
-   _log.info("BoF %s call: hist=%s -> traj=%s | from %s -> %s "
+   _log.debug("BoF %s call: hist=%s -> traj=%s | from %s -> %s "
              "| forward=%.3fm step_mean=%.3fm | radii mean=%.3f max=%.3f min=%.3f%s", kind, history_sliced.shape, trajectory.shape, _format_xyz(last_hist),
              _format_xyz(last_pt), forward, float(step_lens.mean()), float(radii.mean()), float(radii.max()), float(radii.min()),
              f" | {extra}" if extra else "")
-   if _log.isEnabledFor(logging.DEBUG):
-      with np.printoptions(precision=3, suppress=True, linewidth=200):
-         _log.debug("BoF %s traj points (%dx3):\n%s\nradii: %s", kind, trajectory.shape[0], trajectory, np.array2string(radii, precision=3))
+   with np.printoptions(precision=3, suppress=True, linewidth=200):
+      _log.debug("BoF %s traj points (%dx3):\n%s\nradii: %s", kind, trajectory.shape[0], trajectory, np.array2string(radii, precision=3))
 
 
 def _slice_history(history: np.ndarray, has_velocity: bool) -> np.ndarray:
