@@ -13,9 +13,20 @@ from PySide6.QtWidgets import (QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
 
 from drone_sim.gui.backend import StepResult, SimState
 from drone_sim.gui.direct_backend import DirectBackend
-from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_sphere_wireframe, draw_trace, draw_obstacles, draw_obj_mesh
+from drone_sim.api.utils.render_helper import draw_room_wireframe, draw_sphere_wireframe, draw_trace, draw_obstacles, draw_obj_mesh, draw_prediction_tube
 
 _MAX_RUN_STEPS = 5000  # run-to-completion cap (matches paper2_tools/scenarios.py default)
+_PREDICTION_TUBE_SAMPLES = 50           # arc-length samples per BoF prediction tube
+_PREDICTION_TUBE_OUTER_ALPHA = 0.03     # safety-zone tube
+_PREDICTION_TUBE_INNER_ALPHA = 0.08     # core (drone-radius) tube
+_PREDICTION_TUBE_CENTERLINE_ALPHA = 0.02  # dashed centerline opacity (drawn once)
+
+def _coerce_color(color):
+   """Convert color list/tuple to a tuple matplotlib accepts (str passes through)."""
+   if isinstance(color, (list, tuple)):
+      return tuple(float(c) for c in color[:3])
+   return color
+
 
 def _draw_ghost_max_sphere(ax: object, is_adaptive: bool, position, safety_zone:float, max_radius:float, safety_color):
    if is_adaptive:
@@ -277,6 +288,30 @@ class MainWindow(QMainWindow):
             if trace:
                 draw_trace(self._ax, trace, drone.trace_color)
 
+        # BoF prediction tubes (one per drone with a fresh prediction this step).
+        # Outer = post-processed safety radius (barely visible halo).
+        # Inner = drone body radius (slightly more present, with centerline).
+        for pred in result.predictions:
+            outer_color = _coerce_color(pred.color)
+            inner_color = _coerce_color(pred.core_color)
+            inner_radii = np.full(pred.radii.shape, pred.inner_radius)
+
+            draw_prediction_tube(
+                self._ax, pred.points, pred.radii,
+                color=outer_color,
+                n_samples=_PREDICTION_TUBE_SAMPLES,
+                alpha=_PREDICTION_TUBE_OUTER_ALPHA,
+                draw_centerline=False,
+            )
+            draw_prediction_tube(
+                self._ax, pred.points, inner_radii,
+                color=inner_color,
+                n_samples=_PREDICTION_TUBE_SAMPLES,
+                alpha=_PREDICTION_TUBE_INNER_ALPHA,
+                centerline_alpha=_PREDICTION_TUBE_CENTERLINE_ALPHA,
+                draw_centerline=True,
+            )
+
 
         # Set axis limits from room bounds, scaled by zoom level.
         # self._zoom is stored on self (not ax) so ax.cla() never resets it.
@@ -360,6 +395,28 @@ class MainWindow(QMainWindow):
             trace = self._traces.get(drone.drone_id, [])
             if trace:
                 draw_trace(ax, trace, drone.trace_color)
+
+        # BoF prediction tubes (mirror live view: outer safety halo + inner body tube).
+        #  TODO: refactor, it should not be needed to implement that stuff twice!
+        for pred in result.predictions:
+            outer_color = _coerce_color(pred.color)
+            inner_color = _coerce_color(pred.core_color)
+            inner_radii = np.full(pred.radii.shape, pred.inner_radius)
+            draw_prediction_tube(
+                ax, pred.points, pred.radii,
+                color=outer_color,
+                n_samples=_PREDICTION_TUBE_SAMPLES,
+                alpha=_PREDICTION_TUBE_OUTER_ALPHA,
+                draw_centerline=False,
+            )
+            draw_prediction_tube(
+                ax, pred.points, inner_radii,
+                color=inner_color,
+                n_samples=_PREDICTION_TUBE_SAMPLES,
+                alpha=_PREDICTION_TUBE_INNER_ALPHA,
+                centerline_alpha=_PREDICTION_TUBE_CENTERLINE_ALPHA,
+                draw_centerline=True,
+            )
 
         # Axis limits (match live view zoom)
         room_min, room_max = sim_state.room_min, sim_state.room_max

@@ -332,3 +332,107 @@ class TestScenarioConfig:
          lstm_model_path="/path/to/model.pt"
       )
       assert cfg.lstm_model_path == "/path/to/model.pt"
+
+
+class TestScenarioConfigBoF:
+   """Tests for the BoF-related ScenarioConfig fields and validator."""
+
+   def _drone(self):
+      return DroneConfig(drone_id="d1", start=[0.0, 0.0, 0.0], target=[5.0, 5.0, 5.0])
+
+   def test_defaults(self):
+      cfg = ScenarioConfig(
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         drones=[self._drone()],
+      )
+      assert cfg.bof_enabled is False
+      assert cfg.bof_backend == "library"
+      assert cfg.bof_url is None
+      assert cfg.bof_has_velocity is False
+      assert cfg.bof_history_size == 100
+      assert cfg.bof_horizon == 50
+      assert cfg.bof_growth_tau is None
+
+   def test_library_backend_does_not_require_url(self):
+      cfg = ScenarioConfig(
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         drones=[self._drone()],
+         bof_enabled=True,
+         bof_backend="library",
+      )
+      assert cfg.bof_url is None
+
+   def test_rest_backend_requires_url(self):
+      with pytest.raises(ValidationError, match="bof_url"):
+         ScenarioConfig(
+            physics=PhysicsSpec(type="linear_kinematics"),
+            controller=ControllerSpec(type="mpc_agent"),
+            drones=[self._drone()],
+            bof_enabled=True,
+            bof_backend="rest",
+         )
+
+   def test_rest_backend_with_url_ok(self):
+      cfg = ScenarioConfig(
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         drones=[self._drone()],
+         bof_enabled=True,
+         bof_backend="rest",
+         bof_url="http://localhost:5050",
+      )
+      assert cfg.bof_url == "http://localhost:5050"
+
+   def test_invalid_backend_raises(self):
+      with pytest.raises(ValidationError):
+         ScenarioConfig(
+            physics=PhysicsSpec(type="linear_kinematics"),
+            controller=ControllerSpec(type="mpc_agent"),
+            drones=[self._drone()],
+            bof_backend="grpc",  # not in Literal
+         )  # type: ignore[arg-type]
+
+   def test_history_size_must_be_positive(self):
+      with pytest.raises(ValidationError, match="bof_history_size"):
+         ScenarioConfig(
+            physics=PhysicsSpec(type="linear_kinematics"),
+            controller=ControllerSpec(type="mpc_agent"),
+            drones=[self._drone()],
+            bof_history_size=0,
+         )
+
+   def test_bof_horizon_must_be_positive(self):
+      with pytest.raises(ValidationError, match="bof_horizon"):
+         ScenarioConfig(
+            physics=PhysicsSpec(type="linear_kinematics"),
+            controller=ControllerSpec(type="mpc_agent"),
+            drones=[self._drone()],
+            bof_horizon=0,
+         )
+
+   def test_bof_growth_tau_accepts_positive(self):
+      cfg = ScenarioConfig(
+         physics=PhysicsSpec(type="linear_kinematics"),
+         controller=ControllerSpec(type="mpc_agent"),
+         drones=[self._drone()],
+         bof_growth_tau=12.0,
+      )
+      assert cfg.bof_growth_tau == 12.0
+
+   def test_bof_growth_tau_zero_or_negative_raises(self):
+      with pytest.raises(ValidationError, match="bof_growth_tau"):
+         ScenarioConfig(
+            physics=PhysicsSpec(type="linear_kinematics"),
+            controller=ControllerSpec(type="mpc_agent"),
+            drones=[self._drone()],
+            bof_growth_tau=0.0,
+         )
+      with pytest.raises(ValidationError, match="bof_growth_tau"):
+         ScenarioConfig(
+            physics=PhysicsSpec(type="linear_kinematics"),
+            controller=ControllerSpec(type="mpc_agent"),
+            drones=[self._drone()],
+            bof_growth_tau=-1.0,
+         )

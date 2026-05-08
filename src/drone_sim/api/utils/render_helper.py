@@ -176,6 +176,63 @@ def draw_trace(ax: object, trace: list[np.ndarray]|list[list[float]], trace_colo
                    color=trace_color, linewidth=1.0, arrow_length_ratio=0.35)
 
 
+def draw_prediction_tube(ax: object, points: np.ndarray, radii: np.ndarray, *, color, n_samples: int = 50, n_circumference: int = 14, alpha: float = 0.15,
+      centerline_alpha: float = 0.4, draw_centerline: bool = True, ) -> None:
+   """Draw a translucent tube around a predicted trajectory polyline.
+
+   The tube's centerline follows ``points`` (interpolated to ``n_samples`` evenly spaced points along arc length); the tube radius at each sample is the linearly-interpolated value from ``radii``.
+   The result visualizes "where will this neighbor be" plus "how confident are we". A wide tube far ahead means BoF is unsure for that step.
+
+   No-op if fewer than 2 points or zero arc length.
+
+   :param ax: 3D matplotlib Axes.
+   :param points: ``(H, 3)`` predicted positions.
+   :param radii: ``(H,)`` per-step safety radii (already floor/cap clamped).
+   :param color: matplotlib color (str or 3-tuple/list).
+   :param n_samples: arc-length samples along the tube; controls smoothness.
+   :param n_circumference: cross-section samples; 14 keeps the wireframe light.
+   :param alpha: surface transparency for the tube body.
+   :param centerline_alpha: opacity of the dashed centerline drawn on top.
+   """
+   pts = np.asarray(points, dtype=float)
+   rs = np.asarray(radii, dtype=float)
+   if pts.ndim != 2 or pts.shape[1] != 3 or pts.shape[0] < 2 or rs.shape[0] != pts.shape[0]:
+      return
+
+   seg = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+   total = float(seg.sum())
+   if total <= 1e-9:
+      return
+   t_orig = np.concatenate([[0.0], np.cumsum(seg)]) / total
+   t_new = np.linspace(0.0, 1.0, n_samples)
+
+   centers = np.stack([np.interp(t_new, t_orig, pts[:, k]) for k in range(3)], axis=1)
+   sample_radii = np.interp(t_new, t_orig, rs)
+
+   tangents = np.gradient(centers, axis=0)
+   tlen = np.linalg.norm(tangents, axis=1, keepdims=True)
+   tlen[tlen < 1e-9] = 1.0
+   tangents = tangents / tlen
+
+   ref = np.array([0.0, 0.0, 1.0])
+   if abs(float(np.dot(tangents[0], ref))) > 0.95:
+      ref = np.array([1.0, 0.0, 0.0])
+   us = np.cross(tangents, ref)
+   ulen = np.linalg.norm(us, axis=1, keepdims=True)
+   ulen[ulen < 1e-9] = 1.0
+   us = us / ulen
+   vs = np.cross(tangents, us)
+
+   theta = np.linspace(0.0, 2.0 * np.pi, n_circumference, endpoint=True)
+   cos_t = np.cos(theta)[None, :, None]
+   sin_t = np.sin(theta)[None, :, None]
+   surf = (centers[:, None, :] + sample_radii[:, None, None] * (cos_t * us[:, None, :] + sin_t * vs[:, None, :]))
+
+   ax.plot_surface(surf[..., 0], surf[..., 1], surf[..., 2], color=color, alpha=alpha, linewidth=0, antialiased=False, shade=False, )
+   if draw_centerline:
+      ax.plot(centers[:, 0], centers[:, 1], centers[:, 2], color=color, linestyle="--", linewidth=1.0, alpha=centerline_alpha)
+
+
 def draw_neighbor_links(ax: object, neighbor_links: list[tuple[int, int]], drone_positions: list[np.ndarray]) -> None:
    if neighbor_links:
       for i, j in neighbor_links:

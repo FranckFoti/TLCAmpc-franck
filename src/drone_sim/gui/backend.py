@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +21,23 @@ class DroneState:
 
 
 @dataclass
+class PredictedTrajectory:
+    """Per-step prediction emitted by an uncertainty provider (BoF / future LSTM-traj).
+
+    ``points`` and ``radii`` are aligned row-by-row: ``radii[k]`` is the safety
+    radius the planner applied to ``points[k]``. ``inner_radius`` is the
+    drone's physical body radius — constant along the path, used for the
+    inner (core) tube.
+    """
+    drone_id: str                    # the predicted neighbor's id
+    points: np.ndarray               # (H, 3) predicted positions over the horizon
+    radii: np.ndarray                # (H,) post-processed safety radii (floor/cap applied)
+    color: str | list[float]         # neighbor's safety color (outer tube tint)
+    inner_radius: float              # drone.radius — the body, not the safety zone
+    core_color: str | list[float]    # neighbor's drone color (inner tube tint)
+
+
+@dataclass
 class StepResult:
     drones: list[DroneState]
     safety_radii: list[float]         # current effective safety radius per drone
@@ -31,6 +48,7 @@ class StepResult:
     t: float
     all_reached: bool = False              # True when all drones are at their destination
     admm_iteration_count: int | None = None  # None for non-ADMM coordinators
+    predictions: list[PredictedTrajectory] = field(default_factory=list)
 
 
 @dataclass
