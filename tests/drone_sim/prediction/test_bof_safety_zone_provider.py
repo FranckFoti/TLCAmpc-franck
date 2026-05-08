@@ -148,7 +148,11 @@ class TestPredictedTrajectories:
       assert trajs["d0"].shape == (3, 3)
       np.testing.assert_array_almost_equal(trajs["d0"], np.full((3, 3), 7.0))
 
-   def test_resets_each_call(self):
+   def test_accumulates_across_calls(self):
+      """DMPC calls compute_neighbor_safety_radii once per ego drone within a
+      single timestep; the cache must accumulate so the GUI can see tubes for
+      every neighbor predicted that step. Resetting is the simulator's job
+      (clear_step_cache, called once per step)."""
       adapter = FakeAdapter(horizon=3, traj_value=1.0, radius_value=1.0)
       buffer = TrajectoryHistoryBuffer(m=4)
       _fill(buffer, "d0", 4)
@@ -159,7 +163,21 @@ class TestPredictedTrajectories:
       provider.compute_neighbor_safety_radii(["d0", "d1"], {"d0": 1.0, "d1": 1.0})
       provider.compute_neighbor_safety_radii(["d2"], {"d2": 1.0})
 
-      assert set(provider.predicted_trajectories) == {"d2"}
+      assert set(provider.predicted_trajectories) == {"d0", "d1", "d2"}
+
+   def test_clear_step_cache_drops_entries(self):
+      adapter = FakeAdapter(horizon=3, traj_value=1.0, radius_value=1.0)
+      buffer = TrajectoryHistoryBuffer(m=4)
+      _fill(buffer, "d0", 4)
+      _fill(buffer, "d1", 4)
+      provider = BoFSafetyZoneProvider(adapter=adapter, buffer=buffer, horizon=3)
+
+      provider.compute_neighbor_safety_radii(["d0", "d1"], {"d0": 1.0, "d1": 1.0})
+      assert set(provider.predicted_trajectories) == {"d0", "d1"}
+
+      provider.clear_step_cache()
+      assert provider.predicted_trajectories == {}
+      assert provider.last_radii == {}
 
    def test_skips_fallback_neighbors(self):
       adapter = FakeAdapter(horizon=3, traj_value=1.0, radius_value=1.0)

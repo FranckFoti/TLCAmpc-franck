@@ -267,6 +267,9 @@ class Simulator:
             us.append(np.asarray(u, dtype=float).reshape(3))
 
          # Then override optimized drones with coordinator outputs.
+         # Drop BoF predictions cached from the previous step so the GUI sees only the current step's tubes (the provider accumulates across the per-ego-drone calls inside solve_controls).
+         if self._bof_provider is not None and hasattr(self._bof_provider, "clear_step_cache"):
+            self._bof_provider.clear_step_cache()
          try:
             u_by_id = self.coordinator.solve_controls(drones=self.drones, obstacles=self.obstacles, room_min=self.room_min, room_max=self.room_max,
                   lstm_provider=(self._bof_provider or self._lstm_provider), )

@@ -61,8 +61,9 @@ class BoFSafetyZoneProvider:
       :return: Dict of neighbor_id -> r_safety array (H,).
       """
       result: dict[str, np.ndarray] = {}
-      self._last_trajectories = {}
-      self._last_radii = {}
+      # NOTE: don't reset _last_trajectories / _last_radii here. In DMPC, this method is called once per ego drone within a single timestep.
+      # Resetting would let only the last ego drone's neighbors survive, hiding tubes for the remaining drones in the GUI.
+      # The simulator clears the cache once per step via clear_step_cache() before the coordinator runs.
 
       for neighbor_id in neighbor_ids:
          r_floor = r_floor_by_id.get(neighbor_id, 1.0)
@@ -89,6 +90,16 @@ class BoFSafetyZoneProvider:
                    self._horizon, float(result[neighbor_id].mean()), float(result[neighbor_id].max()), float(result[neighbor_id].min()), r_floor)
 
       return result
+
+   def clear_step_cache(self) -> None:
+      """Drop predictions/radii cached during the previous simulator step.
+
+      Called by the simulator at the top of each step so the cache only holds entries from the current step.
+      Resetting per-call would clobber earlier ego drones' neighbor predictions within the same step (DMPC calls this provider once per ego drone),
+      leaving the GUI with only the last call's data.
+      """
+      self._last_trajectories = {}
+      self._last_radii = {}
 
    @property
    def predicted_trajectories(self) -> dict[str, np.ndarray]:
