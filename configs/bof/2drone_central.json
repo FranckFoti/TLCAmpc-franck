@@ -1,0 +1,63 @@
+{
+  "_comment": "bof_history_size is only for testing, \"safety_zone_mode\": \"lstm\" will be changed to 'uncertainty', but for now we life with 'lstm'",
+
+  "dt": 0.05,
+  "room": {"min": [-10, -10, -10], "max": [10, 10, 10]},
+  "physics": [
+    {
+      "id": "default",
+      "type": "linear_kinematics",
+      "params": {
+        "v_max": 3.0,
+        "u_min": [-3.0, -3.0, -3.0],
+        "u_max": [3.0, 3.0, 3.0]
+      }
+    }
+  ],
+
+  "comm_radius": null,
+  "bof_enabled": true,
+  "bof_history_size": 50,
+  "bof_growth_tau": 2,
+
+  "controller": {
+    "type": "mpc_agent",
+    "params": {
+      "horizon": 8,
+      "q_pos": [2.0, 2.0, 2.0],
+      "q_vel": [0.2, 0.2, 0.2],
+      "r_u": [0.5, 0.5, 0.5]
+    }
+  },
+
+  "coordinator": {
+    "type": "mpc_central",
+    "params": {
+      "horizon": 8
+    }
+  },
+  "drones": [
+    {
+      "drone_id": "drone-1",
+      "start": [-0.1, -9.0, 0.2],
+      "target": [0.1, 9.0, -0.2],
+      "radius": 0.2,
+      "safety_zone": 0.6,
+      "cons_stop": 0.0,
+      "drone_color": "#00FFFF",
+      "physics": "default",
+      "safety_zone_mode": "lstm"
+    },
+    {
+      "drone_id": "drone-2",
+      "start": [0.1, 9.0, -0.2],
+      "target": [-0.1, -9.0, 0.2],
+      "radius": 0.2,
+      "safety_zone": 0.6,
+      "cons_stop": 0.0,
+      "drone_color": "#800080",
+      "physics": "default",
+      "safety_zone_mode": "lstm"
+    }
+  ]
+}
