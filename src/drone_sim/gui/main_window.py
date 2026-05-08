@@ -53,6 +53,11 @@ class MainWindow(QMainWindow):
         self._obj_path: Path | None = None  # path to .obj file for 3D drone model
         self._obj_scale: float = 0.3  # scale of the OBJ model in world units
         self._last_result: StepResult | None = None
+        # Recording state (live MP4/GIF capture of the canvas)
+        self._recording: bool = False
+        self._video_writer: object | None = None
+        self._video_path: Path | None = None
+        self._video_frames: int = 0
 
         # ---- Canvas ----
         fig = Figure()
@@ -69,6 +74,7 @@ class MainWindow(QMainWindow):
         self._btn_reset = QPushButton("Reset")
         self._btn_run_to_end = QPushButton("Run to Completion")
         self._btn_screenshot = QPushButton("Screenshot")
+        self._btn_record = QPushButton("Record")
         self._btn_obj_model = QPushButton("OBJ Model")
         self._obj_model_label = QLabel("Model: scatter")
 
@@ -122,6 +128,7 @@ class MainWindow(QMainWindow):
         self._btn_reset.clicked.connect(self._on_reset)
         self._btn_run_to_end.clicked.connect(self._on_run_to_completion)
         self._btn_screenshot.clicked.connect(self._on_screenshot)
+        self._btn_record.clicked.connect(self._on_record)
         self._btn_obj_model.clicked.connect(self._on_select_obj_model)
         self._speed_slider.valueChanged.connect(self._on_speed_changed)
 
@@ -337,6 +344,11 @@ class MainWindow(QMainWindow):
         # Use draw_idle — NOT draw() — to avoid blocking the event loop (pitfall)
         self._canvas.draw_idle()
 
+        # Video recording: grab_frame() forces a sync draw on the figure, so it
+        # captures the just-rendered scene independently of draw_idle's async pump.
+        if self._recording:
+            self._capture_frame()
+
     def _update_step_label(self, result: StepResult) -> None:
         self._step_label.setText(f"Step: {result.step_count} | t: {result.t:.2f} s")
 
@@ -488,6 +500,83 @@ class MainWindow(QMainWindow):
         self._step_label.setText(f"Saved: {path.name}")
 
     # ------------------------------------------------------------------ #
+    # Video recording                                                    #
+    # ------------------------------------------------------------------ #
+
+    def _on_record(self) -> None:
+        """Toggle live video recording of the canvas. MP4 via ffmpeg if
+        available, otherwise GIF via Pillow. Captures one frame per redraw."""
+        if self._recording:
+            self._stop_recording()
+        else:
+            self._start_recording()
+
+    def _start_recording(self) -> None:
+        if self._last_result is None:
+            QMessageBox.warning(self, "Record", "No simulation loaded yet.")
+            return
+
+        from matplotlib.animation import FFMpegWriter, PillowWriter
+
+        sim_state = self._backend.get_state()
+        scenario_name = Path(sim_state.config_path).stem if sim_state.config_path else "unknown"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = Path("screenshots")
+        out_dir.mkdir(exist_ok=True)
+
+        # Frame rate matches current playback speed so the video plays back at
+        # the same pace the user sees on screen. Clamped to a sane range.
+        fps = max(2, min(60, int(round(1000.0 / max(self._interval_ms, 1)))))
+
+        if FFMpegWriter.isAvailable():
+            self._video_path = out_dir / f"{scenario_name}_{timestamp}.mp4"
+            writer = FFMpegWriter(fps=fps, bitrate=2400)
+        else:
+            self._video_path = out_dir / f"{scenario_name}_{timestamp}.gif"
+            writer = PillowWriter(fps=fps)
+
+        # FFMpegWriter.setup() opens the encoder pipe and binds it to the figure.
+        writer.setup(self._canvas.figure, str(self._video_path), dpi=120)
+        self._video_writer = writer
+        self._video_frames = 0
+        self._recording = True
+        self._btn_record.setText("Stop Rec")
+        self._btn_record.setStyleSheet("color: red; font-weight: bold;")
+        self._step_label.setText(f"Recording -> {self._video_path.name} @ {fps} fps")
+        # Capture the current frame immediately so the first redraw isn't missed.
+        self._capture_frame()
+
+    def _stop_recording(self) -> None:
+        if not self._recording or self._video_writer is None:
+            return
+        try:
+            self._video_writer.finish()
+        except Exception as exc:
+            QMessageBox.warning(self, "Record", f"Failed to finalize video: {exc}")
+        self._recording = False
+        self._btn_record.setText("Record")
+        self._btn_record.setStyleSheet("")
+        if self._video_path is not None:
+            self._step_label.setText(f"Saved: {self._video_path.name} ({self._video_frames} frames)")
+        self._video_writer = None
+        self._video_path = None
+        self._video_frames = 0
+
+    def _capture_frame(self) -> None:
+        """Grab the current canvas as one video frame. No-op when not recording."""
+        if not self._recording or self._video_writer is None:
+            return
+        try:
+            self._video_writer.grab_frame()
+            self._video_frames += 1
+        except Exception as exc:
+            # Stop on first failure so we don't spam the user with errors.
+            self._recording = False
+            self._btn_record.setText("Record")
+            self._btn_record.setStyleSheet("")
+            QMessageBox.warning(self, "Record", f"Frame capture failed, recording stopped: {exc}")
+
+    # ------------------------------------------------------------------ #
     # Speed slider                                                        #
     # ------------------------------------------------------------------ #
 
@@ -534,6 +623,7 @@ class MainWindow(QMainWindow):
             self._btn_reset.setParent(None)
             self._btn_run_to_end.setParent(None)
             self._btn_screenshot.setParent(None)
+            self._btn_record.setParent(None)
             self._btn_obj_model.setParent(None)
             self._obj_model_label.setParent(None)
             self._speed_slider.setParent(None)
@@ -558,6 +648,7 @@ class MainWindow(QMainWindow):
             ctrl_layout.addWidget(self._btn_reset)
             ctrl_layout.addWidget(self._btn_run_to_end)
             ctrl_layout.addWidget(self._btn_screenshot)
+            ctrl_layout.addWidget(self._btn_record)
             ctrl_layout.addSpacing(10)
             ctrl_layout.addWidget(self._btn_obj_model)
             ctrl_layout.addWidget(self._obj_model_label)
@@ -591,6 +682,7 @@ class MainWindow(QMainWindow):
             ctrl_layout.addWidget(self._btn_reset)
             ctrl_layout.addWidget(self._btn_run_to_end)
             ctrl_layout.addWidget(self._btn_screenshot)
+            ctrl_layout.addWidget(self._btn_record)
             ctrl_layout.addWidget(self._btn_obj_model)
             ctrl_layout.addStretch()
             ctrl_layout.addWidget(QLabel("Speed:"))
