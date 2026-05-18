@@ -18,7 +18,7 @@
   "comm_radius": null,
   "bof_enabled": true,
   "bof_history_size": 50,
-  "bof_growth_tau": 2,
+  "bof_growth_tau": 5,
 
   "controller": {
     "type": "mpc_agent_adaptive",

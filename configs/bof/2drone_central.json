@@ -18,10 +18,10 @@
   "comm_radius": null,
   "bof_enabled": true,
   "bof_history_size": 50,
-  "bof_growth_tau": 2,
+  "bof_growth_tau": 4,
 
   "controller": {
-    "type": "mpc_agent",
+    "type": "mpc_agent_adaptive",
     "params": {
       "horizon": 8,
       "q_pos": [2.0, 2.0, 2.0],
